@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      T8 浅色主题 demo：首屏防闪烁。
+      必须是这里的第一段脚本、写在任何样式表引用之前——React 挂载前 <html> 上还
+      没有 data-theme，深色偏好的用户会先按 CSS 默认值（深色）闪一下，如果这里
+      判断出用户存过 "light" 就会闪浅色。这段逻辑和 src/lib/theme.ts 里的
+      applyTheme() 必须保持一致，改一处记得改另一处。
+    -->
+    <script>
+      (function () {
+        try {
+          var v = localStorage.getItem("bpq.theme");
+          if (v === "light" || v === "dark") {
+            document.documentElement.setAttribute("data-theme", v);
+          }
+          // v 是 "system" 或读不到：不设置属性，交给 CSS 的
+          // prefers-color-scheme 媒体查询决定。
+        } catch (e) {
+          // localStorage 不可用（隐私模式等），什么都不做，等价于「跟随系统」
+        }
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      T8：theme-color 跟着系统偏好走。这里只覆盖了「跟随系统」这一档——用户在
+      本应用内显式选了和系统相反的主题时，移动端地址栏颜色不会跟着变（真要做到
+      需要在 lib/theme.ts 里用 JS 动态改这个 meta 标签的 content，本次 demo 没做，
+      见 docs/v0.3-浅色主题-demo.md 的「未解决」一节）。
+    -->
+    <meta name="theme-color" content="#17191c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eef1f4" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Bambu Print Queue — 定时静默打印</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,216 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * 配色：深色底 + 拓竹绿。
+ * 只在这里定义颜色，别处一律用 Tailwind 的语义名（bg / surface / brand …），
+ * 这样改配色只改这一处。
+ *
+ * === T2 返工说明（2026-08-25） ===
+ * 用户反馈「颜色太深了」「设置页开关的显示动效错误」，本轮做了两件事：
+ *
+ * 1. 整体提亮一档，参考 makerworld.com.cn 深色界面的观感：不是纯黑，是偏中性的
+ *    深灰蓝，三级底色（bg / surface / surface-2）之间用 HSL 亮度阶梯拉开层次，
+ *    每级相差约 5 个百分点（10% → 15% → 20%），边框和「关」态开关也各自提高到
+ *    能看清轮廓的亮度，不再和背景糊在一起。
+ * 2. 新增 --switch-off / --scrollbar / --scrollbar-hover 三个变量，把原来散落
+ *    在文件底部的两处硬编码色值（#2a2e33 / #3a4048）收回这里统一管理。
+ *
+ * 下面每组注释里的对比度数值用 WCAG 2.1 相对亮度公式手算：
+ *   L = 0.2126*R + 0.7152*G + 0.0722*B（R/G/B 先做 sRGB 线性化）
+ *   对比度 = (L_亮 + 0.05) / (L_暗 + 0.05)
+ * 正文文字要求 ≥ 4.5:1，非文字的 UI 边界（边框、开关轨道）参考 WCAG 1.4.11
+ * 的 3:1 基线，做不到严格达标时也要明显可辨——这是"暗但不至于看不清"的
+ * 分寸，不是纯装饰性调色。
+ *
+ * === T8：浅色主题 demo（2026-08-25，未合入主分支） ===
+ * 按上面这段注释预留的做法，在文件下方新增了 `:root[data-theme="light"]`
+ * 和 `@media (prefers-color-scheme: light)` 两段，重定义同一批变量，组件代码
+ * （写的都是 Tailwind 语义名）一行没改。这是 demo，专门给人评审浅色主题值不值得
+ * 做，**没有合入 `master` / `v0.3-webui`**。详细的调色板对照表、每组变量的对比度
+ * 计算、主题切换的实现说明，见 docs/v0.3-浅色主题-demo.md。
+ */
+:root {
+  /* ---- 三级底色：亮度阶梯 10% → 15% → 20%（HSL L，色相统一 220 度偏蓝灰） ---- */
+  --bg: #17191c;          /* 页面底，L≈10% */
+  --surface: #232529;     /* 卡片，L≈15% */
+  --surface-2: #303338;   /* 次级卡片 / hover，L≈20% */
+
+  /* ---- 边框：L≈34%，surface→border 对比度 2.29:1，bg→border 2.62:1 ---- */
+  /* 旧值 #2a2e33 几乎和当时的卡片背景同色、毫无对比度，这次明确提亮，
+     确保卡片轮廓在新底色上肉眼可辨（不追求文字级 4.5:1，但不能隐形）。 */
+  --border: #575c66;
+
+  /* ---- 正文 / 次要文字 ---- */
+  --fg: #e8eaed;          /* 正文，对 --bg 对比度 14.61:1，远超 4.5:1 */
+  --fg-muted: #aeb1b7;    /* 次要文字，对 --bg 8.20:1 / 对 --surface 7.14:1 /
+                             对 --surface-2 5.90:1，全部 ≥ 4.5:1（比要求下限更保守） */
+
+  /* ---- 品牌色：拓竹绿，在新底色上微调得更透亮 ---- */
+  --brand: #00c853;       /* 原 #00ae42 在新底色下偏暗，调亮后对 --bg 对比度 7.94:1 */
+  --brand-fg: #062712;    /* 绿底上的字，对 --brand 对比度 7.18:1 */
+
+  /* ---- 状态色：在新底色上复核过，够醒目但不刺眼 ---- */
+  --warn: #ffb648;        /* 对 --bg 对比度 10.19:1 */
+  --danger: #ff5a5f;      /* 对 --bg 对比度 5.82:1 */
+
+  /* --idle 目前全项目没有任何组件引用，保留不删（删掉会和其它分支的改动冲突）。 */
+  --idle: #6b7280;
+
+  /* ---- Switch 专用：关态轨道颜色 ----
+   * 为什么不能沿用 --border：--border 是"用来勾轮廓的线"，本来就该克制、不能太
+   * 抢眼；但 Switch 关态是一整块要被一眼认出"这是个可交互控件"的填充面，必须比
+   * 边框更亮、更接近可点击控件的视觉重量。--switch-off 比 --border 更亮
+   * （L 49% vs 34%，surface-2→switch-off 对比度 2.94:1），轨道再叠一圈
+   * --border 描边，双重提示它不是纯装饰背景块。
+   */
+  --switch-off: #747a86;
+
+  /* ---- 滚动条：从文件底部硬编码里收回来的两处颜色 ---- */
+  --scrollbar: #383c42;
+  --scrollbar-hover: #4c5057;
+
+  /* ---- T8 新增：细描边通用色 ----
+   * 给两处「半透明白描边」腾出来的公共变量：ColorDot 的边框、Switch 开态那圈
+   * inset ring。这两处描边的共同点是「要在不可预知的底色（耗材色块 / 品牌绿）
+   * 上勾出一圈能看见的边」，所以历史上一直用半透明白硬编码，深色主题下够用。
+   * 浅色主题下白色板子/白色耗材块会让白描边直接隐形，所以把它提成变量，
+   * 浅色一套单独给深色系半透明值。深色下这里维持和原硬编码同一档位
+   * （原 ColorDot 用 0.25、Switch 用 0.12，两者都在「看得见但不抢戏」区间，
+   * 合并成一个变量后取 0.2 作为两处共用的折中值，肉眼看不出明显差异）。
+   */
+  --hairline: rgba(255, 255, 255, 0.2);
+}
+
+/*
+ * === T8：浅色主题 demo ===
+ *
+ * 下面两段（显式选择 `data-theme="light"` 一段 + 跟随系统的 media query 一段）
+ * 定义的是**同一套值**，必须同步改——选了「写两遍」而不是抽成 @layer base 里的
+ * 公共块，是因为这批变量只有十几行，抽公共块反而要多绕一层 `@apply` 或
+ * CSS `@property`/自定义选择器，对这种量级来说不值得；后续真要合并方案，
+ * 把其中一段删掉、改成从另一段 `@import` 或用 CSS 变量继承即可，不影响任何
+ * 组件代码。
+ *
+ * 两套底色的关系和深色主题**相反**：深色是「bg 最暗 → surface → surface-2 最亮」
+ * 三级递增；浅色下 surface（卡片）是纯白，是三者里最亮的，bg（页面底）是浅灰，
+ * 介于白和 surface-2 之间，surface-2（次级面 / hover）比白更深一档——
+ * 白色卡片摆在浅灰页面上才有层次，卡片内部的次级区域/hover 态再摆一层灰，
+ * 三级视觉上是「白 > 页面浅灰 > 卡片内次级灰」，不是简单的线性亮度阶梯。
+ * 对比度数值见 docs/v0.3-浅色主题-demo.md 里的完整对照表，这里每条只留关键结论。
+ */
+:root[data-theme="light"] {
+  --bg: #eef1f4;          /* 页面底，浅灰，参考 makerworld.com.cn 的浅色底 */
+  --surface: #ffffff;     /* 卡片，纯白 */
+  --surface-2: #e4e8ec;   /* 次级面 / hover，比白深一档 */
+
+  /* 边框：勾白卡片轮廓用，对 surface 2.73:1 / 对 bg 2.41:1——和深色主题一样
+     达不到文字级 4.5:1，也达不到 UI 边界的 3:1，但明显可辨（同深色主题的取舍）。 */
+  --border: #959daa;
+
+  --fg: #1c1f23;          /* 正文，深灰近黑，不用纯黑；对 surface 16.54:1 */
+  --fg-muted: #5b6169;    /* 次要文字，对 bg 5.52:1 / 对 surface 6.25:1 /
+                             对 surface-2 5.08:1，全部 ≥ 4.5:1 */
+
+  /* 拓竹绿在白底上必须压暗才够对比：深色主题的 #00c853 放到白底上只有 2.4:1
+     左右（不达标），这里压到 #067c38，对 surface 5.32:1 / 对 bg 4.69:1。
+     brand-fg 相应反过来用白色系（深色主题是绿底配深绿字，浅色这里绿更暗，
+     配白字对比度同样是 5.32:1）。 */
+  --brand: #067c38;
+  --brand-fg: #ffffff;
+
+  /* 状态色在白底上复核过：warn 对 surface 5.19:1 / 对 bg 4.58:1；
+     danger 对 surface 5.72:1 / 对 bg 5.04:1，都 ≥ 4.5:1。 */
+  --warn: #a15c00;
+  --danger: #c81e28;
+
+  /* --idle 全项目未使用，同深色主题一样保留不删；对 bg 4.26:1 / 对 surface 4.83:1。 */
+  --idle: #6b7280;
+
+  /* switch-off 必须比 border 更深、更接近可交互控件的视觉重量（同深色主题的
+     设计意图，方向相反：深色是「更亮」，浅色是「更深」）。对 surface 3.77:1 /
+     对 surface-2 3.06:1，且明显暗于 border（#7a8496 vs #959daa）。 */
+  --switch-off: #7a8496;
+
+  --scrollbar: #c9ccd2;
+  --scrollbar-hover: #b3b7c0;
+
+  /* ColorDot 边框 / Switch 开态描边：浅色下白色系描边在白卡片、白色耗材块上
+     会隐形，改用深色系半透明。 */
+  --hairline: rgba(17, 20, 24, 0.16);
+}
+
+@media (prefers-color-scheme: light) {
+  /*
+   * :not([data-theme="dark"]) 这个守卫不能省：用户在浅色系统下显式选了「深色」，
+   * data-theme 会被 JS 打成 "dark"，但深色的值本来就定义在无条件的 :root 里
+   * （见文件顶部），所以只要这条 media query 命中就会把浅色值叠上去、盖掉深色
+   * 选择——除非用这个 :not() 守卫把「已经显式选了 dark」的情况排除在外。
+   */
+  :root:not([data-theme="dark"]) {
+    --bg: #eef1f4;
+    --surface: #ffffff;
+    --surface-2: #e4e8ec;
+    --border: #959daa;
+    --fg: #1c1f23;
+    --fg-muted: #5b6169;
+    --brand: #067c38;
+    --brand-fg: #ffffff;
+    --warn: #a15c00;
+    --danger: #c81e28;
+    --idle: #6b7280;
+    --switch-off: #7a8496;
+    --scrollbar: #c9ccd2;
+    --scrollbar-hover: #b3b7c0;
+    --hairline: rgba(17, 20, 24, 0.16);
+  }
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条跟着暗色走，默认的白色滚动槽在深色页面上很跳 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+@layer utilities {
+  /* 数字要等宽，否则温度和进度每跳一下整行都在左右抖 */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}

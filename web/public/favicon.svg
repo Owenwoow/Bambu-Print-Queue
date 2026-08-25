@@ -1,0 +1,13 @@
+<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="7" fill="#067c38" />
+  <text
+    x="16"
+    y="17"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+    font-size="17"
+    font-weight="700"
+    fill="#ffffff"
+  >b</text>
+</svg>

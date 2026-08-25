@@ -1,0 +1,201 @@
+# bpq 技术细节执行报告:拓竹 A1 定时静默打印调度器落地方案
+
+## TL;DR
+- **地基假设成立**:向 A1 通过 FTPS(端口 990,implicit TLS,用户名 `bblp` + Access Code)上传 3mf/gcode 只是写入存储,不会触发预热、风扇、屏幕唤醒或电机动作——打印机保持空闲静默(据 Bambu Lab Wiki《A1 FAQ》原文,220V 输入时 A1 空闲功耗为 5W:"When the voltage input is 220V, the power consumption of the A1 in idle mode is 5 watts"),直到收到独立的 MQTT `project_file` 启动指令。这是整个项目的技术前提,证据充分(高置信度)。因此"当场交任务、静默等待、到点才启动"的架构可行。
+- **通道 A(本地 MQTT + FTPS)是正确主线,但有一个必须先扫清的雷**:2025 年起 A1 固件(从 `01.05.00.00` 起,据 SimplyPrint 帮助文档)引入了"授权控制系统",默认会以 HMS `0500-0500-0001-0007`(MQTT command verification failed)拒绝第三方启动指令。唯一稳定解法是在打印机上开启 **LAN Only 模式 + Developer Mode**——据拓竹官方固件 changelog,"When enabled, Authorization Control will be disabled, allowing the printer to accept all control instructions without verification",且不需要提取证书。这一步是通道 A 能否成立的分水岭。
+- **不要先写调度器**。正确顺序是:先用手动脚本打通"FTPS 上传 → MQTT 启动 → 读状态"三件事(1-2 天),确认 A1 在你的固件版本上接受 `project_file`;再包裸调度器。启动指令里把 `bed_leveling`/`vibration_cali`/`flow_cali` 设 `false` 可跳过大部分吵闹的启动校准(额外收益,但归零/purge 仍不可免)。
+
+## Key Findings
+
+1. **静默上传假设成立(项目基石)**:FTP 服务与打印启动在固件里是两个独立子系统。上传只写 SD 卡/存储,不产生任何物理动作;文件会一直"躺着"直到显式启动指令到达。无任何反证。置信度:架构层面高,直接功耗实测层面中高(社区无人贴过"上传时电表纹丝不动"的仪器读数,但大量"上传后机器仍空闲"的一致报告)。
+
+2. **A1 授权控制是最大变量**:X 系列 2025-01 先行,A/P 系列随后。据 SimplyPrint 帮助文档(2025-06-21),A1 系列在固件 `01.05.00.00` 加入授权控制("For A1-series printers it was added in firmware version 01.05.00.00";X1 系列为 `01.08.03.00beta`/`01.08.05.00` 正式版,P1 系列为 `01.08.02.00`);同文指出截至 2025-06-21 所有拓竹机型都已有带授权控制的固件版本("As of today (June 21th) all Bambu Lab printers now have a firmware version that enables their 'Authorization Control System'")。**LAN Only + Developer Mode 可完全关闭授权校验**,据拓竹官方 X1 固件 `01.08.05.00`(2025/03/12)changelog:"Developer Mode (Available in 'LAN Only' Mode)... When enabled, Authorization Control will be disabled, allowing the printer to accept all control instructions without verification",是官方认可的本地全控路径。
+
+3. **可插拔传输层是对的设计**:通道 A 依赖 LAN Only + Developer Mode;通道 B(云 API / 提取的 Bambu Connect 证书)风险高、易被封号、随固件变动。建议 v0.1 只实做通道 A adapter,通道 B 仅留接口。
+
+4. **官方尚无定时打印功能**:据拓竹社区论坛《Scheduled printing》feature request 帖,定时打印"has been requested many times since December 2022. On Github, on Reddit, and in this very forum",至今仍是开放的功能请求,因此本项目有存在价值;但第三方软件 Bambuddy 已实现带定时启动的打印队列("Schedule prints for specific date and time",要求打印机开启 Developer Mode,运行于 Docker),可作为"现成轮子"参考或替代。
+
+5. **依赖选型**:推荐 `bambulabs_api`(纯 Python,MQTT+FTPS 封装,明确支持 A1,有 `start_print`/`get_state`)作为传输层起点;`OpenBambuAPI`(Doridian)作为协议真相来源文档;调度用 `APScheduler` + `SQLAlchemyJobStore`(SQLite)。
+
+## Details
+
+### 一、地基假设逐条裁定(对应文档「假设表」6 条)
+
+**假设 1:FTPS 上传文件到 A1 存储不会打破静默。**
+- 裁定:**成立**。置信度高(架构)/中高(实测)。
+- 证据:OpenBambuAPI 显示启动是独立的 MQTT `print.project_file` 指令;`pushall` 状态里 `upload` 对象与 `gcode_state` 完全分离。Bambuddy 文档(2025-2026)明确"端口 990 在所有拓竹机型上只服务外部存储(SD/USB)";并记录症状"The 3MF uploads fine, the queue item goes to Printing, and the printer stays idle. After a few minutes the job fails"——即上传本身零物理动作,文件躺在存储上等启动指令。多个论坛帖(ha-bambulab #628、bambulab 论坛 3808)佐证"上传后文件只是躺着,还需单独启动"。
+- 若需自证(最省时):打印机放书房,夜间上传一个大 3mf,人耳听 + 看屏幕是否亮 + 看拓竹 App 功耗/状态是否仍 idle(基线 5W)。5 分钟即可确认。
+
+**假设 2:通过 MQTT `project_file` 能从存储启动指定文件。**
+- 裁定:**成立,但受授权控制门槛限制**。置信度高。
+- 证据:OpenBambuAPI、ha-bambulab、bambulabs_api 三处独立给出可用 payload;A1 mini 实抓包证实字段被遵守。前提是固件 `01.05.00.00`+ 需开 Developer Mode,否则报 HMS `0500-0500-0001-0007`(据 Bambuddy 文档:"Developer Mode is the documented way to turn that off for LAN control")。
+- 自证:开 LAN Only + Developer Mode 后,用下方脚本发一次 `project_file`,看 `gcode_state` 是否转 `RUNNING`。
+
+**假设 3:LAN Only 模式可随时开关、且开启后仍保留本地 MQTT/FTPS。**
+- 裁定:**成立**。置信度高。开启 LAN Only 会断开云(失去 Bambu Handy 远程、云切片、经 App 的固件 OTA;固件仍可离线 SD 卡刷),但保留本地 MQTT(8883)与 FTPS(990)。可随时切回云模式。A1/A1 mini 需先开 LAN Only 才能看到 Access Code;若显示全 0,关掉再开一次。
+
+**假设 4:能读到打印机空闲/忙状态。**
+- 裁定:**成立**。置信度高。MQTT report 里 `gcode_state` 取值为 `IDLE / RUNNING / PAUSE / FINISH / FAILED`(据 Bambuddy 文档,打印机只报这五个);辅以 `mc_percent`(进度)、`subtask_name`(当前文件名)、`print_type`。注意 A1 属 P 系列式增量上报(只发变化字段),需先发 `pushall` 拉全量。判据:启动前要求 `gcode_state == IDLE`,否则默认放弃。
+
+**假设 5:能关掉启动校准以减噪。**
+- 裁定:**部分成立**。置信度高(跳过成立)/高(归零/purge 不可免)。
+- `project_file` 里设 `bed_leveling:false`、`vibration_cali:false`、`flow_cali:false` 确实跳过对应的重新校准(即最吵的振动扫频 XY Mech Sweep 与探床 G29)。但:(a) `bed_leveling:false` 只是不重新探测,上次的网格补偿仍会应用(社区帖 122003:"it just prevents re-probing. The previous mesh data is still applied");(b) 无论如何都会 **homing**(喷头下探到床中心,即 G28)且会画 purge line,这部分动作和噪音不可避免(社区帖 47642:A1 上"whether you select flow dynamics calibration or not, the printer always does a purge line on the bed")。因此对"启动时刻之后"的噪音是显著削减而非归零。
+- 注意:`bambulabs_api` 的 `start_print()` 只暴露了 `flow_calibration` 一个开关,未暴露 `bed_leveling`/`vibration_cali`;若要全控三个 flag,需要直接发原始 MQTT payload,或用其底层 `start_print_3mf` / 自行拼 JSON。该库另有独立的 `calibrate_printer(bed_level, motor_noise_calibration, vibration_compensation)` 对应 MQTT `print.calibration`(手动全校准,与启动 flag 不同)。
+
+**假设 6:传输层可插拔,通道 A 与 B 可互换。**
+- 裁定:**成立(设计层面)**。置信度中。通道 A 与 B 输入输出可统一为 `upload(file)` + `start(task)` + `get_state()` 抽象;但 B 的认证/签名机制与 A 差异大,且 B 有封号风险,建议 v0.1 仅实现 A。
+
+### 二、通道 A 具体技术细节
+
+**FTPS 接入:**
+- 协议:implicit FTP over TLS,端口 990。用户名 `bblp`,密码 = Access Code。
+- 证书:自签名,需在 Python 里关闭校验(`ssl.CERT_NONE` / `rejectUnauthorized:false`)。
+- **A1 专属坑**:A1/A1 mini 的 FTPS 数据通道 SSL 行为与 X1C/P1S 不同,数据通道加密会导致传输挂起/超时。Bambuddy v0.1.6+ 的做法是"控制通道 implicit FTPS 加密,数据通道跳过 SSL"("skips SSL on the data channel while keeping the control channel encrypted via implicit FTPS")。此外 ESP 硬件导致吞吐慢,建议一次只传一个文件;历史上 P1 曾有 >256KB 上传导致重启的 bug(需在你的固件上实测)。A1 只支持被动模式(PASV),用 PORT 主动模式会被拒。
+- 上传目录:根目录 `/` 或 `cache/`。实践中上传到根目录 `/` 最稳妥(有报告称上传到 `/sdcard/` 等子目录会被拒)。`project_file` 的 `url` 用 `file:///sdcard/<name>.3mf` 或 `ftp:///<name>.3mf` 形式。
+
+FTPS implicit TLS 上传的 Python 写法(社区验证的 `ImplicitFTP_TLS` 子类,源自 bambulab 论坛 115179):
+```python
+import ftplib, ssl
+
+class ImplicitFTP_TLS(ftplib.FTP_TLS):
+    """支持 implicit FTPS 的 FTP_TLS 子类(ftplib 默认只支持 explicit)。"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sock = None
+    @property
+    def sock(self):
+        return self._sock
+    @sock.setter
+    def sock(self, value):
+        if value is not None and not isinstance(value, ssl.SSLSocket):
+            value = self.context.wrap_socket(value)
+        self._sock = value
+
+def upload(ip, access_code, local_path, remote_name):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ftp = ImplicitFTP_TLS(context=ctx)
+    ftp.connect(host=ip, port=990, timeout=20)
+    ftp.login(user="bblp", passwd=access_code)
+    ftp.prot_p()                      # 加密数据通道(A1 若挂起需改为跳过/用 curl)
+    ftp.set_pasv(True)                # A1 只支持被动模式
+    with open(local_path, "rb") as f:
+        ftp.storbinary(f"STOR {remote_name}", f)
+    ftp.quit()
+```
+备用(命令行,A1 数据通道跳过 SSL 更稳):`curl --ftp-ssl --insecure --user "bblp:<CODE>" --upload-file model.gcode.3mf "ftps://<IP>:990/"`
+
+**本地 MQTT:**
+- Broker:`mqtts://<PRINTER_IP>:8883`,TLS(自签名,`CERT_NONE`)。用户名 `bblp`,密码 = Access Code。
+- Topic:订阅 `device/{SERIAL}/report`,发布到 `device/{SERIAL}/request`。可用 `#` 通配订阅。
+- 证书报错(`certificate verify failed`)在 mosquitto 里加 `--insecure` 不够;要么用正确 CA(从 BambuStudio 源码里找),要么在 paho 里 `tls_set(cert_reqs=ssl.CERT_NONE)` + `tls_insecure_set(True)`。
+
+MQTT 连接、订阅 report、主动 pushall 的 paho 写法:
+```python
+import ssl, json, paho.mqtt.client as mqtt
+
+SERIAL = "AC12309BH109"
+def on_connect(c, u, flags, rc):
+    c.subscribe(f"device/{SERIAL}/report")
+    c.publish(f"device/{SERIAL}/request",
+              json.dumps({"pushing": {"sequence_id": "0",
+                          "command": "pushall", "version": 1, "push_target": 1}}))
+def on_message(c, u, msg):
+    data = json.loads(msg.payload)
+    st = data.get("print", {}).get("gcode_state")
+    if st: print("gcode_state =", st)
+
+cli = mqtt.Client()
+cli.username_pw_set("bblp", "<ACCESS_CODE>")
+cli.tls_set(cert_reqs=ssl.CERT_NONE)
+cli.tls_insecure_set(True)
+cli.on_connect = on_connect
+cli.on_message = on_message
+cli.connect("<PRINTER_IP>", 8883, 60)
+cli.loop_forever()
+```
+
+启动打印的完整 `project_file` JSON(A1 静默减噪版,标注必填):
+```json
+{
+  "print": {
+    "sequence_id": "0",
+    "command": "project_file",
+    "param": "Metadata/plate_1.gcode",   // 必须:3mf 内的 plate gcode 路径
+    "url": "file:///sdcard/<name>.3mf",  // 必须:存储上的文件路径
+    "subtask_name": "<name>.3mf",
+    "project_id": "0", "profile_id": "0",
+    "task_id": "0", "subtask_id": "0",   // 本地打印一律填 0
+    "md5": "",
+    "bed_type": "auto",                  // 本地打印用 auto
+    "bed_leveling": false,               // 减噪:跳过重新探床(旧网格仍应用)
+    "vibration_cali": false,             // 减噪:跳过振动扫频(最吵)
+    "flow_cali": false,                  // 减噪:跳过流量校准
+    "layer_inspect": false,
+    "timelapse": false,
+    "use_ams": false,                    // A1 无 AMS 时 false
+    "ams_mapping": [0]
+  }
+}
+```
+成功判据:report 里同 `sequence_id` 的 `result:"success"`,随后 `gcode_state` 转 `RUNNING`。(字段命名注意:OpenBambuAPI 文档里写 `bed_levelling`,而 App/Studio 实抓包里是 `bed_leveling`——以实抓包的 `bed_leveling` 为准,必要时两个都发。)
+
+**A1 与 X1C/P1S 差异要点**:A1/A1 mini 的 FTPS 数据通道 SSL 需特殊处理;A1 属增量上报(需 pushall);授权控制在 A1 是 `01.05.00.00` 引入(X1 是 `01.08.03.00beta`/`01.08.05.00`);A1 有 microSD 卡槽,gcode 上传目标是 SD/存储。
+
+### 三、通道 B 与厂商风险
+
+- 云 API 逆向现状(2025-2026):认证为邮箱密码 + 邮箱验证码换 token,MQTT 用 `u_{USER_ID}` + access token,broker 为 `us.mqtt.bambulab.com:8883`。2025-01 起本地控制需授权;社区从 Bambu Connect(Electron app)里提取了 X.509 证书 + 私钥用于绕过(Hackaday 2025-01-19 报道;v1.1.3 未混淆可直接 `asar extract`,后续 v1.2.1-beta.5 起用 electron-vite 字节码混淆)。可用项目:`coelacant1/Bambu-Lab-Cloud-API`(文档,基于 firmware 01.08.02.00/01.09.00.00 测试,截至 2025-10)、`schwarztim/bambu-mcp`(内置提取证书)。
+- **"厂商随时可掐掉"的环节**:(1) 云 API 与提取证书方案——拓竹可轮换证书、封号(社区明确警告云连接流可能导致临时封禁);(2) 未来固件可能进一步限制;(3) 提取的证书有效期约 1 年(社区分析:证书到期后打印机网络功能可能严重降级)。缓解:v0.1 走通道 A + Developer Mode,完全本地、不碰云、不封号;Developer Mode 是官方给的合法本地全控口子(官方 changelog 承认其存在与用途),是目前最稳的地基。留 SD 卡手动兜底。
+
+### 四、工程落地
+
+**调度器 / 睡眠处理:**
+- 选型:`APScheduler` + `SQLAlchemyJobStore(SQLite)`。服务重启后待发任务不丢(持久化到 SQLite);用 `date` trigger(一次性绝对时刻)。
+- 错过任务语义:APScheduler 在重启后对"错过的执行"用 `misfire_grace_time` 判定是否仍触发;超过则视为 misfire 丢弃,可配 `coalesce=True` 合并。对本项目:**到点若机器不空闲默认放弃**——语义上等于把 misfire 当"放弃",写日志。注意默认 `misfire_grace_time=1` 秒,若不想让唤醒后立即补发,应显式设短并处理 `EVENT_JOB_MISSED`;若想"唤醒后仍尝试",则设长 grace(如 3600)。
+- **电脑睡眠是主要威胁**。两种正交策略:
+  - 阻止睡眠(v0.1 最省事):Windows 用 `ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`(`ES_CONTINUOUS=0x80000000`, `ES_SYSTEM_REQUIRED=0x00000001`),服务运行期间保持系统不睡,退出时用 `SetThreadExecutionState(ES_CONTINUOUS)` 复位;或用 `wakepy` 库跨平台封装(零依赖、MIT)。Linux 用 `systemd-inhibit` 或 `systemctl mask` 睡眠目标。注意:此法防不了用户主动按睡眠/合盖。
+  - 定时唤醒(更省电,家庭服务器线):Linux 用 systemd timer 的 `WakeSystem=true`(`OnCalendar=` 到点唤醒)或 `rtcwake -m no --date '...'` 设 RTC 闹钟;Windows 用任务计划的"唤醒计算机运行此任务"(底层是 `CreateWaitableTimer` + `SetWaitableTimer(fResume=TRUE)`)。注意 RTC 唤醒依赖 BIOS/UEFI 支持,且系统自动唤醒后有约 2 分钟"无人值守空闲计时器",需在此窗口内用 `SetThreadExecutionState(ES_SYSTEM_REQUIRED)` 声明忙碌,否则会立刻回睡。
+  - 建议:v0.1 在当前会睡眠的电脑上先用"阻止睡眠"确保正确性;迁到家庭服务器后配 systemd timer `WakeSystem=true` 省电。
+- 进程形态:CLI(提交/列出/取消任务)+ 常驻守护进程(持有 APScheduler)+ systemd unit(`Restart=on-failure`)。v0.1 在会睡眠的电脑上可先手动 `python -m bpq daemon`。
+
+**任务提交入口(文档标"空的"):**
+- 可行选项(按推荐度):
+  1. **CLI 手动提交**(v0.1 首选):`bpq submit model.gcode.3mf --at "23:30"`。最简单、无额外依赖、契合"有灵感当场交出去"。
+  2. **文件夹监听(watch folder)**:用 `watchdog` 监听一个目录,切片后把 3mf 丢进去即触发提交(可配套一个约定文件名或 sidecar json 指定时刻)。适合"切完直接拖过去"的工作流。
+  3. **Bambu Studio CLI**:`bambu-studio --slice 1 --load-settings "machine.json;process.json" --load-filaments "filament.json" --export-3mf out.gcode.3mf model.3mf` 可 headless 切片,但 Bambu Studio 仅 x86_64、无 ARM 原生构建(家庭服务器若为 ARM 需注意)。可用于"提交时才切片"的进阶场景,v0.1 不必。
+  4. Bambu Studio 后处理脚本:用户已排除随 G4 那条路径;作为纯"提交触发器"理论可行但耦合 Studio,不推荐。
+
+### 五、修正后的风险排序执行顺序(时间预算 1-2 周)
+
+用户已意识到"先做调度器再验通道"是反的。正确顺序:
+
+- **第 0 步(0.5 天)· 验静默地基**:开 LAN Only 记下 Access Code、IP、SERIAL。夜里 FTPS 传一个大 3mf,确认无声、屏不亮、状态 idle(功耗保持 5W 基线)。→ 若这步失败,整个项目推翻(改走"到点才上传"备选)。
+- **第 1 步(0.5 天)· 打通 FTPS 上传**:用上面的 `ImplicitFTP_TLS` 脚本传文件成功(A1 数据通道若挂起,改跳过数据通道 SSL 或用 curl)。
+- **第 2 步(0.5 天)· 打通 MQTT 读状态**:连 8883、pushall、能稳定读到 `gcode_state`;顺便 `info.get_version` 记录固件版本号。
+- **第 3 步(1 天)· 打通 MQTT 启动(最高风险)**:开 Developer Mode,发 `project_file`,确认 `gcode_state` 转 `RUNNING`。**若报 HMS 0500-0500-0001-0007 就是没开 Developer Mode 或固件不匹配**。这步过了,项目核心风险即清除。
+- **第 4 步(2-3 天)· 包裸调度器**:APScheduler + SQLite 持久化、date trigger、到点检查 `IDLE` 否则放弃、append-only 日志、传输层抽象成 adapter。
+- **第 5 步(1-2 天)· 睡眠处理 + 进程形态**:阻止睡眠或定时唤醒;CLI + daemon + systemd unit。
+- **第 6 步(1 天)· 提交入口 + 收尾**:CLI submit(+可选 watch folder);通知留空接口。
+
+前 4 步(核心不确定性)控制在 3 天内;把不确定性最大的第 3 步尽早做完,是这份排序的关键。
+
+## Recommendations
+
+1. **今晚就做第 0-3 步的手动验证**,不写任何调度代码。用 5 行脚本确认 A1 在你的固件上:(a) 上传静默、(b) 接受 `project_file`。这是 go/no-go 决策点。判据:`gcode_state` 从 `IDLE` 转 `RUNNING` 且启动前全程静默。
+2. **传输层用 `bambulabs_api` 起步**,但保留直发原始 MQTT payload 的能力(因为要控 `bed_leveling`/`vibration_cali` 三个 flag,而该库 `start_print` 只暴露 `flow_calibration`)。
+3. **v0.1 固定走通道 A + Developer Mode**,通道 B 只留接口不实现。绝不在 v0.1 碰云 API/提取证书(封号 + 证书 1 年过期 + 固件易变)。
+4. **睡眠:v0.1 用 `SetThreadExecutionState`/`wakepy` 阻止睡眠**保正确性;迁家庭服务器后换 systemd timer `WakeSystem=true` 省电。
+5. **提交入口 v0.1 用 CLI**,watch folder 作为快速跟进项。
+6. **固件策略:先不要升级固件**。锁定当前能工作的固件版本(第 2 步已记录版本号),升级前查 changelog——授权控制/LAN 行为在持续变动。若必须升级,升级后重跑第 3 步验证。
+7. **触发这些阈值就改方案**:若第 3 步在 Developer Mode 下仍无法启动 → 检查固件版本,必要时降级到 A1 授权控制之前的固件(`01.05.00.00` 之前);若 A1 FTPS 大文件仍导致重启/挂起 → 改用命令行 curl 且分块/限速,或走"到点才上传 + 立即启动"合并路径。
+
+## Caveats
+
+- **无仪器实测的静默证据**:社区无人贴过"上传时电表/分贝计读数",静默结论是架构 + 大量一致观察的强推断。请用第 0 步亲自证实(5 分钟)。
+- **协议非官方、随时可变**:MQTT/FTPS payload 全部来自逆向(OpenBambuAPI 等),拓竹可在任意固件里加签名/改字段。本报告结论的时效性绑定 2025-2026 固件状态。
+- **A1 固件版本敏感**:授权控制在 A1 `01.05.00.00` 引入。你的实际固件版本决定要不要 Developer Mode、payload 是否被接受——务必先 `info.get_version` 查清。
+- **减噪非归零**:关校准 flag 能砍掉振动扫频/探床,但 homing(G28)与 purge line 不可免;"触发时刻之前静默"能 100% 保证,"触发时刻之后立即安静"只能显著改善。
+- **Developer Mode 的代价**:开启后打印机不能连 Bambu Cloud(纯 LAN),失去 Handy 远程和云 OTA。与用户"迁无头服务器"方向一致,可接受。
+- **Bambuddy 已有定时打印**:若你更想要成品而非造轮子,Bambuddy 的 print queue 已支持 timed starts(同样要求 Developer Mode、跑在 Docker);但它是完整应用,与你"轻量自建、学习网络协议"的目标不同。官方至今无原生定时打印功能。
+- **单 MQTT 连接限制**:拓竹打印机同一时刻只接受一个 MQTT 客户端连接。你的 daemon 常连时,不要同时开着 Bambu Studio/OrcaSlicer 连同一台机,否则会互相踢线。

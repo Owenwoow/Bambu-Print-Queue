@@ -1,0 +1,27 @@
+# systemd unit 模板 —— 给家庭服务器用，v0.1 在 Windows 上手动 `bpq daemon` 即可。
+#
+# 安装：
+#   sudo cp deploy/bpq.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bpq
+#
+# 迁到服务器后，把 config.toml 里 [daemon].inhibit_sleep 设为 false，
+# 改用 RTC 定时唤醒（systemd timer 的 WakeSystem=true）更省电。
+# 注意系统自动唤醒后有约 2 分钟的「无人值守空闲计时器」，
+# 需要在窗口内声明忙碌，否则会立刻回睡。
+
+[Unit]
+Description=bpq - Bambu A1 scheduled silent print daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/bpq
+Environment=BPQ_CONFIG=/opt/bpq/config.toml
+ExecStart=/opt/bpq/.venv/bin/bpq daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 前端：依赖与构建产物都不入库。构建产物不入库的代价由「未构建时给一页构建说明」兜住。
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+
+# 运行时数据：任务库、日志、上传缓存
+var/*
+!var/.gitkeep
+
+# 本地测试模型（3mf 动辄几十 MB）
+assets/
+
+# 真机抓下来的原始报文（含 SERIAL / wifi ssid，绝不入库）
+# 脱敏后的夹具在 tests/fixtures/reports/ 下，那个是入库的
+docs/samples/
+
+# 本地配置（含打印机 IP / Access Code / SERIAL，绝不入库）
+config.toml
+.env
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+.claude/

@@ -1,0 +1,110 @@
+# bpq 配置示例
+# 复制为 config.toml 后填写真实值。config.toml 已在 .gitignore 中，不会入库。
+
+[printer]
+# A1 需先开启「LAN Only 模式」才能看到 Access Code；若显示全 0，关掉再开一次。
+# 固件 01.05.00.00 起有「授权控制」，必须同时开启 Developer Mode，
+# 否则 MQTT 启动指令会被拒，报 HMS 0500-0500-0001-0007。
+ip          = "192.168.1.100"
+serial      = "AC12309BH109"
+access_code = "12345678"
+model       = "A1"
+
+[transport]
+# lan = 通道 A（本地 MQTT + FTPS），v0.1 唯一实现
+# cloud = 通道 B（逆向云 API），仅留接口，未实现
+channel = "lan"
+
+# FTPS 数据通道是否加密。社区文档称 A1 加密数据通道会挂起，但实测（固件见 docs/）
+# 恰好相反：明文数据通道会被服务器直接断开（EOFError），必须 PROT P。
+# 若大文件 STOR 出现挂起，再改 false 或改用 curl 兜底。
+ftps_port          = 990
+ftps_encrypt_data  = true
+ftps_remote_dir    = "/"
+mqtt_port          = 8883
+
+[print]
+# 减噪开关：跳过最吵的启动校准。注意 homing(G28) 与 purge line 不可免。
+#
+# v0.2 起这些只是**默认值**——每个任务都能单独覆盖（`bpq submit --timelapse`、
+# 或在 WebUI 的新建任务页上勾）。任务没指定的开关才落到这里的值上，
+# 也就是说改了这里，所有「没单独指定过」的待触发任务都会跟着变。
+bed_leveling   = false
+vibration_cali = false
+flow_cali      = false
+timelapse      = false
+layer_inspect  = false
+
+# ams_mapping 里填这个值表示「这一位耗材不走 AMS，用外部料」。
+# **尚未实测**：社区实现里 -1 和 255 都见过。做成配置项就是为了真机验证之后
+# 只改这一行，不用动代码。相关取证见 docs/v0.2-多色映射语义.md。
+external_spool_id = -1
+
+[scheduler]
+# 到点时打印机不空闲（gcode_state != IDLE）的处理方式：
+#   abort = 放弃并记日志（默认，符合 v0.1 约定）
+#   （不做「十分钟后再试」——见项目框架「明确不做」）
+on_printer_busy = "abort"
+
+# 上一单以 FAILED 收场时是否照常触发。FAILED 表示上个任务的结局，机器其实是闲的，
+# 但板子上可能还留着失败的残骸。默认 false。
+start_after_failure = false
+
+# 错过触发时刻的宽限秒数（进程重启 / 电脑睡眠唤醒后）。
+# 设小 = 错过就当放弃；设大（如 3600）= 唤醒后仍尝试补发。
+misfire_grace_time = 300
+
+# 上传时机：early = 提交时就传（依赖「上传静默」地基假设，默认）
+#           late  = 到点才传（地基假设不成立时的备选架构）
+upload_timing = "early"
+
+[daemon]
+# v0.1 跑在会睡眠的电脑上，运行期间阻止系统睡眠保正确性。
+# 迁到家庭服务器后改用 systemd timer WakeSystem=true 更省电。
+inhibit_sleep = true
+db_path       = "var/bpq.sqlite3"
+journal_path  = "var/bpq.jsonl"
+spool_dir     = "var/tasks"
+
+[web]
+# v0.2 起的局域网 WebUI。它**寄生在 daemon 进程里**，共用同一条 MQTT 长连接——
+# 打印机同一时刻只接受一个 MQTT 客户端，WebUI 绝不能自己再开一条。
+enabled = true
+
+# "127.0.0.1" = 只有本机能打开；"0.0.0.0" = 局域网内（手机、平板）都能打开。
+# 填 0.0.0.0 时下面的 password 必须非空，否则 daemon 会拒绝启动 web 服务——
+# 那道闸是为了挡住「随手把打印机的控制权暴露到内网」。
+host = "127.0.0.1"
+port = 8710
+
+# 登录口令。注意局域网内是 http，**口令是明文传输的**，
+# 请用一个不与其他任何服务复用的口令。
+password = ""
+
+# 从本机（127.0.0.1）访问时跳过口令，图 CLI 与本地操作方便。
+# 副作用：这台电脑上任何进程/任何用户都能不经口令操作打印任务。
+# 多人共用的电脑上应该设成 false。
+allow_local_no_auth = true
+
+# 登录状态保留天数。签名是无状态的，daemon 重启后不用重新登录；
+# 改了上面的 password 则所有已登录会话立即失效。
+session_days = 30
+
+[link]
+# daemon 与打印机之间那条常驻 MQTT 连接的行为参数。
+#
+# A1 是增量上报，只推变化的字段。万一漏掉某条增量，本地快照就会和实际状态偏离，
+# 所以每隔一段时间主动重拉一次全量兜底。
+# pushall 是只读查询，不会让打印机有任何物理动作；但「打印进行中反复 pushall」
+# 尚未实测过，所以打印期间不发（那时增量报文本来就源源不断，也不需要重拉）。
+pushall_interval = 300
+
+# 超过这么久没收到任何报文，就认为快照已经不新鲜，界面上要标出来并尝试重连。
+stale_after = 120
+
+# 断线重连的退避上限（秒）。
+reconnect_max_delay = 30
+
+[notify]
+# 预留接口，v0.1 不实现（见项目框架「明确不做」）
+enabled = false
