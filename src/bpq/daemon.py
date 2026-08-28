@@ -12,7 +12,7 @@ import os
 import signal
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -187,7 +187,12 @@ def _heartbeat() -> None:
     从而感知 CLI 进程刚写进去的新任务。"""
 
 
-def serve(cfg: Config) -> None:
+def serve(cfg: Config, *, on_web_ready: Callable[[str], None] | None = None) -> None:
+    """跑 daemon，直到收到退出信号。
+
+    on_web_ready：WebUI 起来之后拿它的地址回调一次，懒人版用它自动开浏览器。
+    WebUI 关着或没起来时不会被调用。
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -195,10 +200,10 @@ def serve(cfg: Config) -> None:
     # 单实例检查放在最外层：重复启动要在连打印机、建 jobstore、阻止睡眠之前就失败，
     # 否则第二个实例已经把第一个的 MQTT 连接挤掉了，再报错也晚了。
     with single_instance(lock_path_for(cfg)):
-        _serve_locked(cfg)
+        _serve_locked(cfg, on_web_ready=on_web_ready)
 
 
-def _serve_locked(cfg: Config) -> None:
+def _serve_locked(cfg: Config, *, on_web_ready: Callable[[str], None] | None = None) -> None:
     from bpq import runtime
 
     journal = Journal(cfg.daemon.journal_path)
@@ -251,6 +256,8 @@ def _serve_locked(cfg: Config) -> None:
         runtime.set_current(ctx)
         try:
             web = _start_web(cfg, link, service, journal, ctx)
+            if web is not None and on_web_ready is not None:
+                on_web_ready(web.url)
             log.info("bpq daemon 已启动，jobstore=%s", cfg.daemon.db_path)
             for job in sched.get_jobs():
                 if job.id != "__heartbeat__":
