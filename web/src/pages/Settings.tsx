@@ -70,9 +70,12 @@ function PrinterConnection() {
   const [form, setForm] = useState({ ip: "", serial: "", access_code: "", model: "" });
   const [fieldErr, setFieldErr] = useState<{ ip?: string; serial?: string; model?: string }>({});
   const [probe, setProbe] = useState<ProbeResult | null>(null);
-  const [busy, setBusy] = useState<"" | "test" | "save">("");
+  const [busy, setBusy] = useState<"" | "test" | "save" | "discover">("");
   const [err, setErr] = useState("");
   const [saved, setSaved] = useState(false);
+  // 独立于 err：自动获取序列号失败不该和「测试连接」/「保存」的报错混在一起，
+  // 不然用户分不清是哪个操作失败的。
+  const [discoverErr, setDiscoverErr] = useState("");
 
   useEffect(() => {
     api.printerConfig().then(
@@ -105,6 +108,36 @@ function PrinterConnection() {
       setProbe(await api.testPrinter(payload()));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "试连失败");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // IP 格式不对，或者 access code 既没填也没存过——这两种情况下 FTPS 连不上，
+  // 和 validateForm() 用的是同一条 IP 正则，保持同样的心智模型。
+  const discoverDisabled =
+    !!busy ||
+    !/^\d{1,3}(\.\d{1,3}){3}$/.test(form.ip.trim()) ||
+    (!form.access_code.trim() && !cfg?.access_code_set);
+
+  const discoverSerial = async () => {
+    setBusy("discover");
+    setDiscoverErr("");
+    try {
+      const d = await api.discoverSerial({
+        ip: form.ip.trim(),
+        ...(form.access_code ? { access_code: form.access_code.trim() } : {}),
+      });
+      if (d.ok) {
+        // 只是把值填进这个已有的可编辑输入框，不锁定、不禁用它——
+        // 自动获取出错或探测到旧序列号时，人还能接着手动改。
+        setForm((f) => ({ ...f, serial: d.serial }));
+      } else {
+        setDiscoverErr(`自动获取失败：${d.detail}，可以直接手动填`);
+      }
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "未知错误";
+      setDiscoverErr(`自动获取失败：${detail}，可以直接手动填`);
     } finally {
       setBusy("");
     }
@@ -154,14 +187,22 @@ function PrinterConnection() {
 
         <Field
           label="序列号 SERIAL"
-          hint="打印机屏幕「设置 → 关于」里能看到，也可以从 FTPS 上传日志的文件名里读到"
+          hint="打印机屏幕「设置 → 关于」里能看到；填完 IP 和 Access Code 后也可以点右侧按钮自动获取"
         >
-          <Input
-            value={form.serial}
-            onChange={(e) => setForm({ ...form, serial: e.target.value })}
-            placeholder="AC12309BH109"
-          />
+          <div className="flex gap-2">
+            <Input
+              className="flex-1"
+              value={form.serial}
+              onChange={(e) => setForm({ ...form, serial: e.target.value })}
+              placeholder="AC12309BH109"
+            />
+            <Button size="sm" onClick={() => void discoverSerial()} disabled={discoverDisabled}>
+              {busy === "discover" ? <Loader2 size={14} className="animate-spin" /> : null}
+              自动获取
+            </Button>
+          </div>
           {fieldErr.serial ? <div className="text-xs text-danger">{fieldErr.serial}</div> : null}
+          {discoverErr ? <div className="text-xs text-danger">{discoverErr}</div> : null}
         </Field>
 
         <Field

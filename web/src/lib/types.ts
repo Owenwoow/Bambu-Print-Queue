@@ -183,6 +183,11 @@ export interface ProbeResult {
   state?: string;
 }
 
+/** 「自动获取序列号」的结果。失败时只给 detail，不像 ProbeResult 那样带 state。 */
+export type DiscoverSerialResult =
+  | { ok: true; serial: string }
+  | { ok: false; detail: string };
+
 export interface AppConfig {
   printer: { model: string; ip: string; serial_masked: string };
   print_defaults: Record<keyof PrintOptions, boolean>;

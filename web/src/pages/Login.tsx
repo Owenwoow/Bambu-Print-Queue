@@ -33,7 +33,7 @@ export function Login() {
           </div>
           <div>
             <div className="font-semibold">Bambu Print Queue</div>
-            <div className="text-xs text-muted">拓竹 A1 定时静默打印</div>
+            <div className="text-xs text-muted">拓竹 A1 打印任务预约</div>
           </div>
         </div>
 

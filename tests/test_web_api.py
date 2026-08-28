@@ -274,6 +274,95 @@ def test_config_不泄露凭据(auth_client: TestClient) -> None:
     assert PASSWORD not in body
 
 
+# ------------------------------------------------------- 自动发现 SERIAL
+
+
+def test_自动发现_serial_成功(auth_client: TestClient, monkeypatch: MonkeyPatch) -> None:
+    """成功路径：monkeypatch 掉 discover_serial，不真的去建 FTPS 连接。"""
+    import bpq.transport.lan as lan
+
+    seen: dict = {}
+
+    def fake_discover(ip: str, access_code: str, **kwargs: object) -> str:
+        seen["ip"] = ip
+        seen["access_code"] = access_code
+        return "AB12CD34EF5678G"
+
+    monkeypatch.setattr(lan, "discover_serial", fake_discover)
+
+    r = auth_client.post(
+        "/api/config/printer/discover-serial",
+        json={"ip": "10.0.0.9", "access_code": "999999"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "serial": "AB12CD34EF5678G"}
+    assert seen == {"ip": "10.0.0.9", "access_code": "999999"}
+
+
+def test_自动发现_serial_失败时返回_200_而不是_500(
+    auth_client: TestClient, monkeypatch: MonkeyPatch
+) -> None:
+    """TransportError 要翻成 {ok: False, detail}，不能让异常直接冒成 500——
+    前端得拿到写给人看的失败原因。"""
+    import bpq.transport.lan as lan
+    from bpq.transport.base import TransportError
+
+    def fake_discover(ip: str, access_code: str, **kwargs: object) -> str:
+        raise TransportError("连接成功，但 logger 目录里没有找到能识别出 SERIAL 的日志文件名")
+
+    monkeypatch.setattr(lan, "discover_serial", fake_discover)
+
+    r = auth_client.post(
+        "/api/config/printer/discover-serial",
+        json={"ip": "10.0.0.9", "access_code": "999999"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "SERIAL" in body["detail"]
+
+
+def test_自动发现_serial_access_code_留空时退回已保存值(
+    auth_client: TestClient, monkeypatch: MonkeyPatch
+) -> None:
+    """和 _probe_printer 一样的语义：已经保存过 access_code 就不用重填。"""
+    import bpq.transport.lan as lan
+
+    seen: dict = {}
+
+    def fake_discover(ip: str, access_code: str, **kwargs: object) -> str:
+        seen["access_code"] = access_code
+        return "AB12CD34EF5678G"
+
+    monkeypatch.setattr(lan, "discover_serial", fake_discover)
+
+    r = auth_client.post("/api/config/printer/discover-serial", json={"ip": "10.0.0.9"})
+    assert r.status_code == 200
+    assert seen["access_code"] == "123"  # make_cfg() 里配的已保存值
+
+
+def test_自动发现_serial_没给_ip_返回_400(auth_client: TestClient) -> None:
+    r = auth_client.post(
+        "/api/config/printer/discover-serial", json={"access_code": "999999"}
+    )
+    assert r.status_code == 400
+
+
+def test_自动发现_serial_没有_access_code_也没存过则返回_400(
+    tmp_path: Path,
+) -> None:
+    """构造一台从没设过 access_code 的打印机：没传、也没得退，该拒绝。"""
+    cfg = make_cfg(tmp_path)
+    import dataclasses
+
+    cfg = dataclasses.replace(cfg, printer=dataclasses.replace(cfg.printer, access_code=""))
+    c = build_client(cfg, tmp_path)
+    assert c.post("/api/auth/login", json={"password": PASSWORD}).status_code == 200
+
+    r = c.post("/api/config/printer/discover-serial", json={"ip": "10.0.0.9"})
+    assert r.status_code == 400
+
+
 # ---------------------------------------------------------------- 文件
 
 

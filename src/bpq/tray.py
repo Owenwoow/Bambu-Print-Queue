@@ -127,14 +127,10 @@ def _confirm_exit_message(pending_count: int) -> str | None:
 
 
 def _make_icon_image(color: tuple[int, int, int], size: int = 64):  # noqa: ANN201
-    """程序生成一个实心圆图标，不依赖任何外部图片资源。"""
-    from PIL import Image, ImageDraw
+    """b 字标 + 状态色背景（颜色语义见 _STATE_COLORS），和 favicon.svg / exe 图标同款。"""
+    from bpq.icon import draw_mark
 
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    margin = size // 8
-    bbox = (margin, margin, size - margin, size - margin)
-    ImageDraw.Draw(image).ellipse(bbox, fill=(*color, 255))
-    return image
+    return draw_mark(size, bg=color)
 
 
 # --------------------------------------------------------------------- 开机自启

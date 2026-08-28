@@ -395,6 +395,37 @@ def create_app(
         """只试连，不保存。让人在按「保存」之前就知道参数对不对。"""
         return _probe_printer(current_cfg(), body, link=link)
 
+    @api.post("/api/config/printer/discover-serial")
+    def discover_printer_serial(body: Annotated[dict, Body()]) -> dict:
+        """只连 FTPS 读 SERIAL，不碰 MQTT。
+
+        daemon 运行期间随时可以调用，**不需要** `_probe_printer()` 那套「先让出
+        PrinterLink 连接、探测完再抢回来」的机制——那套是为了避免两条 MQTT 连接
+        互抢打印机，而这里全程只碰 FTPS（990 端口），和 PrinterLink 独占的那条
+        MQTT 连接（8883 端口）是完全独立的两个连接，不受「同一时刻只接受一个
+        连接」这条红线约束（该红线只针对 MQTT）。做法照抄 lan.py 里 upload()
+        的先例：开一条临时 FTPS 连接，读完关掉，不留存。
+        """
+        cfg = current_cfg()
+        ip = str(body.get("ip") or "").strip()
+        access_code = str(body.get("access_code") or cfg.printer.access_code or "").strip()
+        if not ip:
+            raise HTTPException(status_code=400, detail="没有打印机 IP")
+        if not access_code:
+            raise HTTPException(
+                status_code=400, detail="没有 Access Code，也没有已保存的可以沿用"
+            )
+
+        from bpq.transport.base import TransportError
+        from bpq.transport.lan import discover_serial
+
+        try:
+            serial = discover_serial(ip, access_code)
+        except TransportError as exc:
+            # 不让异常直接变成 500——前端要能拿到写给人看的失败原因。
+            return {"ok": False, "detail": str(exc)}
+        return {"ok": True, "serial": serial}
+
     @api.patch("/api/config/printer")
     def patch_printer_config(body: Annotated[dict, Body()]) -> dict:
         """改打印机连接参数。

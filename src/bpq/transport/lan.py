@@ -14,6 +14,7 @@ from __future__ import annotations
 import ftplib
 import json
 import logging
+import re
 import ssl
 import threading
 from pathlib import Path
@@ -93,6 +94,68 @@ def insecure_ssl_context() -> ssl.SSLContext:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+# logger/ 目录下的文件名格式（实测，见 docs/验证记录-通道A.md 第 13 行）：
+#   {SERIAL}_{MM-DD}_{HH_MM_SS.mmm}_v{固件版本}_idx_{N}.log
+# 目录里偶尔还有一个叫 latest 的文件，不匹配这个模式，_parse_serial_from_logger_listing
+# 会自然跳过它，不当错误处理。
+_LOGGER_NAME_RE = re.compile(r"^([0-9A-Za-z]+)_\d{2}-\d{2}_.*_v[\d.]+_idx_\d+\.log$")
+
+
+def _parse_serial_from_logger_listing(names: list[str]) -> str | None:
+    """从 logger/ 目录的文件名列表里提取 SERIAL。
+
+    拆成纯函数是为了能不碰网络就单元测试这一步——真正的正确性风险全在这条正则
+    上，FTPS 握手本身已经在 upload() 里验证过很多次了。
+    """
+    for name in names:
+        m = _LOGGER_NAME_RE.match(name)
+        if m:
+            return m.group(1)
+    return None
+
+
+def discover_serial(ip: str, access_code: str, *, port: int = 990, timeout: float = 15.0) -> str:
+    """只用 IP + Access Code 连一次 FTPS，从 logger/ 目录文件名里读 SERIAL。
+
+    不需要预先知道 SERIAL——FTPS 登录用固定用户名 bblp + Access Code，这正是能
+    做「自动发现」的原因（对比 MQTT：topic 是 device/<SERIAL>/report，不知道
+    SERIAL 就没法订阅，这条路走不通，见 docs/验证记录-通道A.md 第 84-86 行）。
+
+    这是一次性探测连接，用完即关，不进 PrinterLink，不占用那条常驻 MQTT 连接的
+    任何资源——FTPS 和 MQTT 是两个独立端口，互不影响，这条连接的开关顺序照抄
+    upload() 里验证过的握手顺序。
+    """
+    ftp = ImplicitFTP_TLS(context=insecure_ssl_context())
+    try:
+        try:
+            ftp.connect(host=ip, port=port, timeout=timeout)
+            ftp.login(user=FTP_USER, passwd=access_code)
+            ftp.prot_p()        # 同 upload()：数据通道必须加密，明文会被直接断开
+            ftp.set_pasv(True)  # A1 只支持被动模式
+        except (OSError, ftplib.Error) as exc:
+            raise TransportError(
+                f"FTPS 连接失败 ({ip}:{port}): {exc}。请检查 IP 和 Access Code 是否正确"
+            ) from exc
+
+        try:
+            names = ftp.nlst("logger")
+        except ftplib.error_perm as exc:
+            raise TransportError(f"连接成功，但读取 logger 目录失败：{exc}") from exc
+    finally:
+        try:
+            ftp.quit()
+        except Exception:  # noqa: BLE001 - 关连接出错不该盖掉发现结果/原始错误
+            ftp.close()
+
+    serial = _parse_serial_from_logger_listing([Path(n).name for n in names])
+    if serial is None:
+        raise TransportError(
+            "连接成功，但 logger 目录里没有找到能识别出 SERIAL 的日志文件名"
+            "（目录为空，或文件名格式与预期不一致），需要手动填写序列号"
+        )
+    return serial
 
 
 class LanTransport(PrinterTransport):

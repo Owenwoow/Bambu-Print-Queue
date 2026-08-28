@@ -1,5 +1,6 @@
 import type {
   AppConfig,
+  DiscoverSerialResult,
   PrinterConfig,
   PrinterConfigInput,
   ProbeResult,
@@ -142,6 +143,12 @@ export const api = {
   savePrinter: (body: PrinterConfigInput & { force?: boolean }) =>
     request<PrinterConfig & { probe: ProbeResult }>("/api/config/printer", {
       method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  /** 只连 FTPS 读 SERIAL，不碰 MQTT、不保存。序列号字段依旧可以手动改。 */
+  discoverSerial: (body: { ip: string; access_code?: string }) =>
+    request<DiscoverSerialResult>("/api/config/printer/discover-serial", {
+      method: "POST",
       body: JSON.stringify(body),
     }),
   saveConfig: (body: {

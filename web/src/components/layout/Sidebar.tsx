@@ -81,7 +81,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <div className="leading-tight">
           <div className="text-sm font-semibold">Bambu Print Queue</div>
-          <div className="text-[11px] text-muted">定时静默打印</div>
+          <div className="text-[11px] text-muted">拓竹打印任务预约</div>
         </div>
       </div>
 
