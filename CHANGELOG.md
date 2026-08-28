@@ -3,7 +3,11 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [0.3.3] — 2026-08-28
+## [0.3.4] — 2026-08-28
+
+> v0.3.3 的 tag 已推送但发布失败（GUI 托盘版 exe 在 CI 冒烟测试阶段没过），
+> 没有对应的 GitHub Release、没有产出任何二进制文件，直接跳过、不重用这个
+> 版本号。以下内容是 v0.3.3 原本要发的东西，实际随 v0.3.4 一并发出。
 
 ### 变更
 

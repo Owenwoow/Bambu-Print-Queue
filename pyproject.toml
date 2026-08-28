@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bpq"
-version = "0.3.3"
+version = "0.3.4"
 description = "拓竹 A1 定时静默打印调度器：当场交任务，静默等待，到点自己开打"
 readme = "README.md"
 requires-python = ">=3.11"

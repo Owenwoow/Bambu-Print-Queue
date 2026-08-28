@@ -20,7 +20,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from bpq import __version__
-from bpq.config import ConfigError, project_root
+from bpq.config import ConfigError, find_config_path, project_root
 from bpq.config import load as load_config
 from bpq.lazy import ensure_config
 
@@ -78,6 +78,8 @@ def main() -> int:
     # 平时（用户双击）不会被设置，是完全休眠的代码路径。
     selftest = os.environ.get("BPQ_TRAY_SELFTEST") == "1"
 
+    config_path = find_config_path()
+    is_new_config = not config_path.exists()
     try:
         cfg = load_config(ensure_config())
     except ConfigError as exc:
@@ -85,6 +87,10 @@ def main() -> int:
         if not selftest:
             _show_error("bpq 启动失败", str(exc))
         return 1
+    if is_new_config:
+        # 没有控制台可以 print()，这条「首次运行生成了配置文件」的提示只能进日志——
+        # 用户要看，就是打开 var/bpq.log 或者直接去网页「设置」页填打印机参数。
+        log.info("首次运行，已生成配置文件：%s", config_path)
 
     from bpq import runtime
     from bpq.daemon import AlreadyRunning, serve

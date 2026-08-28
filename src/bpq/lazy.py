@@ -41,6 +41,11 @@ def ensure_config() -> Path:
     """保证 exe 旁边有一份 config.toml，返回它的路径。
 
     已经有就原样用——绝不覆盖，那里面是用户填过的打印机凭据。
+
+    刻意不在这里 print() 任何东西：这个函数也被 traymain.py（`--windowed` 打包，
+    没有控制台窗口）复用，那种进程下 `sys.stdout` 是 None，一 print() 就是一次
+    未捕获异常，直接把整个启动流程炸掉。要不要提示"刚生成了配置文件"，
+    由调用方按自己有没有控制台/日志决定——`run()` 就是这么做的。
     """
     path = find_config_path()
     if path.exists():
@@ -55,8 +60,6 @@ def ensure_config() -> Path:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(example, path)
-    print(f"首次运行，已经生成配置文件：{path}", flush=True)
-    print("打印机的 IP / SERIAL / Access Code 待会儿在网页的「设置」页里填。\n", flush=True)
     return path
 
 
@@ -85,12 +88,18 @@ def run() -> int:
 
     from bpq.daemon import AlreadyRunning, serve
 
+    config_path = find_config_path()
+    is_new_config = not config_path.exists()
     try:
         cfg = load_config(ensure_config())
     except ConfigError as exc:
         print(f"\n配置有问题，起不来：\n{exc}")
         _pause()
         return 1
+
+    if is_new_config:
+        print(f"首次运行，已经生成配置文件：{config_path}", flush=True)
+        print("打印机的 IP / SERIAL / Access Code 待会儿在网页的「设置」页里填。\n", flush=True)
 
     if not cfg.web.enabled:
         print("提醒：config.toml 里 [web] enabled = false，网页界面不会启动。")

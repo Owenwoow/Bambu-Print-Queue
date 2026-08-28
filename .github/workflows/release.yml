@@ -79,6 +79,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path $work | Out-Null
           Copy-Item "dist/bpq.exe" (Join-Path $work "bpq.exe") -Force
           $outFile = Join-Path $work "selftest_result.txt"
+          $logFile = Join-Path $work "var\bpq.log"
+
+          # 失败时把 var/bpq.log 原样吐到 Actions 日志里——这个 exe 没有控制台，
+          # 失败原因全在这个文件里，不转存出来就只能靠猜。
+          function Dump-Log {
+            if (Test-Path $logFile) {
+              Write-Host "----- var/bpq.log -----"
+              Get-Content $logFile | Write-Host
+              Write-Host "----- end of var/bpq.log -----"
+            } else {
+              Write-Host "##[warning] $logFile 不存在，daemon 大概率没跑到 _setup_logging() 之后"
+            }
+          }
 
           $env:BPQ_TRAY_SELFTEST = "1"
           $env:BPQ_TRAY_SELFTEST_OUT = $outFile
@@ -89,19 +102,23 @@ jobs:
           if (-not $proc.HasExited) {
             Write-Host "##[error] GUI 托盘版 selftest 60 秒内未退出，判定超时失败，强杀进程"
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Dump-Log
             exit 1
           }
           if ($proc.ExitCode -ne 0) {
             Write-Host "##[error] GUI 托盘版 selftest 退出码非 0：$($proc.ExitCode)"
+            Dump-Log
             exit 1
           }
           if (-not (Test-Path $outFile)) {
             Write-Host "##[error] GUI 托盘版 selftest 未生成结果文件：$outFile"
+            Dump-Log
             exit 1
           }
           $content = Get-Content $outFile -Raw
           if ($content -notmatch "OK") {
             Write-Host "##[error] GUI 托盘版 selftest 结果文件内容异常：$content"
+            Dump-Log
             exit 1
           }
           Write-Host "GUI 托盘版 selftest 通过：$outFile -> $content"
