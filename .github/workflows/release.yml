@@ -1,0 +1,129 @@
+name: Release
+
+# 推一个 vX.Y.Z 标签触发：三平台各打一个单文件可执行程序，外加一份 Docker 镜像，
+# 一起挂到该标签对应的 GitHub Release 上。
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: bpq-linux-x86_64
+          - os: windows-latest
+            asset: bpq-windows-x86_64.exe
+          - os: macos-latest
+            asset: bpq-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 构建前端（产物打进二进制里）
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 装运行依赖 + pyinstaller
+        run: pip install -e ".[build]"
+
+      - name: PyInstaller 打包（Windows）
+        if: runner.os == 'Windows'
+        run: >
+          pyinstaller --noconfirm --onefile --name bpq
+          --add-data "web/dist;web/dist" --paths src
+          --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
+          src/bpq/cli.py
+
+      - name: PyInstaller 打包（Linux / macOS）
+        if: runner.os != 'Windows'
+        run: >
+          pyinstaller --noconfirm --onefile --name bpq
+          --add-data "web/dist:web/dist" --paths src
+          --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
+          src/bpq/cli.py
+
+      - name: 冒烟测试（--version 起得来）
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./dist/bpq.exe --version
+          else
+            ./dist/bpq --version
+          fi
+
+      - name: 改名成带平台标识的产物
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv dist/bpq.exe "${{ matrix.asset }}"
+          else
+            mv dist/bpq "${{ matrix.asset }}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          # 硬编码小写名字：Docker 镜像名不允许大写，而仓库名 Bambu-Print-Queue 有大写，
+          # 直接用 ${{ github.repository }} 会拼出不合法的 tag。
+          images: ghcr.io/owenwoow/bambu-print-queue
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    needs: [build-binaries, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
