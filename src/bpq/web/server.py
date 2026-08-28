@@ -56,6 +56,13 @@ def run_in_thread(app: FastAPI, *, host: str, port: int) -> ServerHandle:
         port=port,
         log_level="warning",     # uvicorn 的 access log 太吵，daemon 自己有日志
         access_log=False,
+        # uvicorn 默认会自己 dictConfig 一套带颜色的 formatter，构造时探测
+        # sys.stdout.isatty() 来决定要不要上色。托盘版 exe 没有控制台，
+        # sys.stdout 是真正的 None（不是"重定向到文件"那种），.isatty() 直接
+        # AttributeError，daemon 还没跑起来就崩了。关掉 uvicorn 自己那套配置，
+        # 它的日志就走 daemon.py 已经装好的 root logger（console 版走 stderr，
+        # 托盘版走 var/bpq.log），没有理由让它另起一套格式化逻辑。
+        log_config=None,
     )
     server = _NoSignalServer(config)
 
