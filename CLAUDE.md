@@ -67,6 +67,10 @@
 
 ## Git 约束
 
+分支怎么开、怎么合、怎么发版、怎么清理，完整规则在
+`.claude/skills/git-branch/SKILL.md`，需要新建分支、给子 agent 开 worktree、合并、
+打 tag 发版或清理分支时先读它，本节只留常驻硬红线。
+
 - **禁止把自己（Claude / Anthropic）加为协作者**：提交信息中不得包含
   `Co-Authored-By: Claude` 或任何形式的 Claude/Anthropic 署名，这是本项目对 Claude Code
   默认提交模板的覆盖。

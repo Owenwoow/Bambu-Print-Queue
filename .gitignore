@@ -37,4 +37,6 @@ config.toml
 .DS_Store
 Thumbs.db
 
-.claude/
+# .claude/ 下只有 skills 是项目协作规则的一部分，跟着仓库走；settings 等本地配置继续忽略
+.claude/*
+!.claude/skills/
