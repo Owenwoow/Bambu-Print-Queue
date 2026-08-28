@@ -1,5 +1,10 @@
 # bpq — 拓竹 A1 定时静默打印调度器
 
+[![CI](https://github.com/Owenwoow/Bambu-Print-Queue/actions/workflows/ci.yml/badge.svg)](https://github.com/Owenwoow/Bambu-Print-Queue/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Owenwoow/Bambu-Print-Queue)](https://github.com/Owenwoow/Bambu-Print-Queue/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
+
 > 替我记住「睡前再打」这件事的中间人。
 
 打印机在书房，启动例程（尤其振动补偿那段）很吵，晚上开工会吵到休息。
@@ -8,6 +13,18 @@
 
 bpq 接下这个动作：当场把任务交出去，指定一个绝对时刻，**在那之前打印机对它一无所知**——
 不预热、不转风扇、不出声。到点了自己开打。
+
+## 目录
+
+- [状态](#状态)
+- [安装](#安装)（[预编译版本](#方式一下载预编译版本不需要装-python--node) /
+  [Docker](#方式二docker) / [源码](#方式三源码安装)）
+- [使用教程](#使用教程)（[CLI](#cli) / [WebUI](#webui)）
+- [部署](#部署)（[Docker](#docker) / [systemd](#家庭服务器systemd) / [普通电脑](#普通电脑开发机--笔记本)）
+- [目录结构](#目录结构)
+- [设计约定](#设计约定)
+- [已知坑](#已知坑)
+- [贡献](#贡献)
 
 ## 状态
 
@@ -28,12 +45,27 @@ WebUI 从 v0.2 起就是产品的一部分：寄生在 daemon 进程里，复用
 
 ## 安装
 
+三种方式任选一种：直接下载可执行文件最省事；长期挂在 NAS/服务器上推荐 Docker；
+改代码或想跟着源码走用 pip。
+
+### 方式一：下载预编译版本（不需要装 Python / Node）
+
+去 [Releases](https://github.com/Owenwoow/Bambu-Print-Queue/releases) 下最新版本
+对应平台的单文件可执行程序（Linux / Windows / macOS），前端已经打进去了，双击或
+`./bpq daemon` 直接跑。跳到下面「打印机与配置」继续。
+
+### 方式二：Docker
+
+见下面「[部署 → Docker](#docker)」一节，`docker compose up -d` 一条命令起服务。
+
+### 方式三：源码安装
+
 ```bash
 git clone https://github.com/Owenwoow/Bambu-Print-Queue.git
 cd Bambu-Print-Queue
 ```
 
-### 后端
+#### 后端
 
 ```bash
 pip install -e ".[dev]"
@@ -41,7 +73,7 @@ pip install -e ".[dev]"
 
 `pyproject.toml` 里已经声明了 `bpq` 这个 CLI 入口，装完可以直接跑 `bpq --help`。
 
-### 前端（WebUI，可选）
+#### 前端（WebUI，可选）
 
 前端产物不入库，第一次用之前要自己构建一次（需要 Node）：
 
@@ -133,6 +165,21 @@ WebUI 不提供「立即打印」、不做打印机 SD 卡文件管理、不做�
 
 ## 部署
 
+### Docker
+
+NAS / 群晖 / 软路由这类常年开机的设备推荐用 Docker：
+
+```bash
+cp config.example.toml config.toml   # 按上面「打印机与配置」填好
+docker compose up -d
+```
+
+`docker-compose.yml` 默认拉取 GitHub Actions 自动构建的镜像
+（`ghcr.io/owenwoow/bambu-print-queue:latest`），也可以 `docker compose build`
+自己从源码构建。Docker 场景下 `config.toml` 有两处必须改（`[web].host` 必须是
+`0.0.0.0`、`[web].password` 必须非空，否则端口映射进不来），详细教程见
+[`docs/部署-Docker.md`](docs/部署-Docker.md)。
+
 ### 家庭服务器（systemd）
 
 `deploy/bpq.service` 是一个 systemd unit 模板：
@@ -152,7 +199,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now bpq
 不需要上面这一套。直接 `bpq daemon` 常驻即可——`config.toml` 里
 `[daemon].inhibit_sleep` 保持默认的 `true`，daemon 会自己用 `wakepy` 阻止系统睡眠。
 
-## 目录
+## 目录结构
 
 ```
 src/bpq/
@@ -179,7 +226,8 @@ src/bpq/
 web/              前端源码（React + Vite + Tailwind），产物 web/dist 不入库
 scripts/          真机验证 + 取数用的手动脚本
 deploy/           systemd unit 模板（家庭服务器线）
-docs/             项目框架、技术执行报告、实测记录
+docs/             部署教程、实测记录、架构决策；索引见 docs/README.md
+Dockerfile        多阶段构建：Node 编前端 → 只带 Python 运行依赖的最终镜像
 ```
 
 ## 设计约定
@@ -245,6 +293,7 @@ docs/             项目框架、技术执行报告、实测记录
 ## 贡献
 
 欢迎 issue 和 PR。提交前请先看 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+版本变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 
