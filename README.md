@@ -95,7 +95,13 @@ NAS/服务器上推荐 Docker；改代码或想跟着源码走用 pip。
 > 「Windows 已保护你的电脑」——点「更多信息」，再点「仍要运行」即可，
 > 后续运行不会再弹。
 
-Linux / macOS 目前不出预编译版本，用下面的 Docker 或源码方式。
+**懒人版（托盘 UI）只有 Windows**——`tray.py` / `traymain.py` 深度依赖
+`ctypes.windll` / `winreg` / `os.startfile` / `pystray` 的 Windows 后端，没做过
+跨平台适配。但**控制台/daemon 版**（`bpq-cli`，就是上面说的 `bpq-cli.exe` 那套
+命令行）现在 Linux 和 macOS（Apple Silicon）也有预编译二进制可下：`Releases`
+页面里的 `bpq-cli-<版本号>-linux-x86_64` 和 `bpq-cli-<版本号>-macos-arm64`，同样
+不需要装 Python / Node，下载后 `chmod +x` 就能跑 `bpq-cli --help`。命令行用法见
+下面「使用教程」；不想用预编译二进制，也可以照样走下面的 Docker 或源码方式。
 
 ### 方式二：Docker
 

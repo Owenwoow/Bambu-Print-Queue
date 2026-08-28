@@ -12,14 +12,20 @@ permissions:
   packages: write
 
 jobs:
-  # 目前只出 Windows 版，且是两个产物：
-  #   - bpq-<版本>-windows-x86_64.exe      GUI 托盘版（--windowed，src/bpq/traymain.py）
-  #     双击就起 daemon + WebUI，托盘常驻，不带控制台窗口，主推的懒人版形态。
-  #   - bpq-cli-<版本>-windows-x86_64.exe  控制台版（src/bpq/cli.py）
-  #     给愿意敲命令的人：submit / ls / daemon / status ... 完整 CLI。
-  # 要恢复 Linux / macOS，把 matrix 里对应两行放回来，并把打包那步的 --add-data
-  # 分隔符换成冒号（Windows 用分号，POSIX 用冒号，这是 PyInstaller 的规矩）。
-  build-binaries:
+  # 现在出四个产物，分两个 job：
+  #   build-windows（windows-latest）：
+  #     - bpq-<版本>-windows-x86_64.exe      GUI 托盘版（--windowed，src/bpq/traymain.py）
+  #       双击就起 daemon + WebUI，托盘常驻，不带控制台窗口，主推的懒人版形态。
+  #     - bpq-cli-<版本>-windows-x86_64.exe  控制台版（src/bpq/cli.py）
+  #       给愿意敲命令的人：submit / ls / daemon / status ... 完整 CLI。
+  #   build-cli-binaries（ubuntu-latest / macos-latest matrix）：
+  #     - bpq-cli-<版本>-linux-x86_64        控制台版，Linux。
+  #     - bpq-cli-<版本>-macos-arm64         控制台版，macOS（Apple Silicon）。
+  #   托盘版（GUI）只有 Windows：src/bpq/tray.py / traymain.py 深度依赖
+  #   ctypes.windll / winreg / os.startfile / pystray 的 Windows 后端，没做过
+  #   跨平台适配，不在 Linux/macOS 的构建范围内。
+  # PyInstaller 的 --add-data 分隔符规矩：Windows 用分号 `;`，POSIX 用冒号 `:`。
+  build-windows:
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +61,7 @@ jobs:
       - name: PyInstaller 打包（GUI 托盘版，懒人版，主推）
         run: >
           pyinstaller --noconfirm --onefile --windowed --name bpq
+          --icon packaging/bpq.ico
           --add-data "web/dist;web/dist"
           --add-data "config.example.toml;."
           --paths src
@@ -136,6 +143,7 @@ jobs:
       - name: PyInstaller 打包（控制台版：submit / ls / daemon / status ...）
         run: >
           pyinstaller --noconfirm --onefile --name bpq-cli
+          --icon packaging/bpq.ico
           --add-data "web/dist;web/dist"
           --add-data "config.example.toml;."
           --paths src
@@ -149,6 +157,62 @@ jobs:
       - name: 改名成带版本号和平台标识的产物（控制台版）
         shell: bash
         run: mv dist/bpq-cli.exe "bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
+          path: bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
+          if-no-files-found: error
+
+  # 只出控制台/daemon 版（src/bpq/cli.py），不出托盘版——理由见上面 jobs 顶部注释。
+  build-cli-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+          - os: macos-latest
+            suffix: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 构建前端（产物打进二进制里）
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 装运行依赖 + pyinstaller
+        run: pip install -e ".[build]"
+
+      - name: 从 tag 取版本号
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: PyInstaller 打包（控制台/daemon 版，不含托盘 UI）
+        run: >
+          pyinstaller --noconfirm --onefile --name bpq-cli
+          --add-data "web/dist:web/dist"
+          --add-data "config.example.toml:."
+          --paths src
+          --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
+          src/bpq/cli.py
+
+      - name: 冒烟测试（--version 起得来）
+        run: ./dist/bpq-cli --version
+
+      - name: 改名成带版本号和平台标识的产物
+        run: mv dist/bpq-cli "bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -187,7 +251,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   release:
-    needs: [build-binaries, docker]
+    needs: [build-windows, build-cli-binaries, docker]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
