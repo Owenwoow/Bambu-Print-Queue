@@ -121,6 +121,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: bpq-*
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
