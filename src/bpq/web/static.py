@@ -7,6 +7,7 @@ clone 下来直接跑会没有页面——所以这里必须给一条能照做�
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -40,7 +41,13 @@ npm run build</pre>
 
 
 def frontend_dir() -> Path:
-    """构建产物的位置：仓库根的 web/dist。"""
+    """构建产物的位置：仓库根的 web/dist。
+
+    PyInstaller 打包成单文件后 `__file__` 指向运行期解压目录，不再是仓库布局，
+    要改从 `sys._MEIPASS` 找——打包命令必须用 `--add-data` 把 web/dist 放到同一相对路径下。
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "web" / "dist"
     return Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
