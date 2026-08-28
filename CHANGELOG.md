@@ -3,6 +3,34 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] — 2026-08-28
+
+### 新增
+
+- **Windows「懒人版」可执行文件**：双击 `bpq-0.3.2-windows-x86_64.exe` 就直接把
+  daemon 和 WebUI 跑起来，并自动打开浏览器，全程不用敲命令。第一次运行会在 exe
+  旁边自动生成 `config.toml`（已存在则原样保留，绝不覆盖），打印机的
+  IP / SERIAL / Access Code 在网页的「设置」页里填即可——连不上打印机不影响
+  daemon 启动，正好留给用户在网页上把参数补完。
+  从终端带参数调用同一个 exe（`bpq-....exe submit ...`）走的仍然是原来的 CLI，
+  只有「双击、零参数」才进懒人版流程。
+- 发布产物的文件名带上版本号（`bpq-<版本>-windows-x86_64.exe`），下载多个版本
+  放在一起不会分不清哪个是哪个。
+
+### 修复
+
+- **修复打包成 exe 后任务不持久化的严重问题。** 定位配置文件和 `var/` 目录时用的是
+  `__file__`，源码运行没问题，但 PyInstaller 单文件模式下它指向每次启动重建、
+  进程一退出就被删掉的临时解包目录。后果是任务库、日志、上传缓存全落在临时目录里，
+  **关掉程序当天提交的定时任务就没了，而且不会有任何报错**——直接违反项目
+  「任务必须持久化」这条硬约束。改成冻结环境下按 exe 自身所在目录解析，
+  并补了 `tests/test_frozen_paths.py` 把这条钉死。
+
+### 变更
+
+- 预编译产物暂时只出 Windows 版。Linux / macOS 用 Docker 或源码安装；
+  要恢复三平台构建，`.github/workflows/release.yml` 的 matrix 里放回两行即可。
+
 ## [0.3.1] — 2026-08-28
 
 ### 修复

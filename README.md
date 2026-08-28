@@ -17,7 +17,7 @@ bpq 接下这个动作：当场把任务交出去，指定一个绝对时刻，*
 ## 目录
 
 - [状态](#状态)
-- [安装](#安装)（[预编译版本](#方式一下载预编译版本不需要装-python--node) /
+- [安装](#安装)（[懒人版 exe](#方式一下载即用的懒人版windows不需要装-python--node) /
   [Docker](#方式二docker) / [源码](#方式三源码安装)）
 - [使用教程](#使用教程)（[CLI](#cli) / [WebUI](#webui)）
 - [部署](#部署)（[Docker](#docker) / [systemd](#家庭服务器systemd) / [普通电脑](#普通电脑开发机--笔记本)）
@@ -45,14 +45,33 @@ WebUI 从 v0.2 起就是产品的一部分：寄生在 daemon 进程里，复用
 
 ## 安装
 
-三种方式任选一种：直接下载可执行文件最省事；长期挂在 NAS/服务器上推荐 Docker；
-改代码或想跟着源码走用 pip。
+三种方式任选一种：Windows 上想开箱即用就下懒人版 exe，双击就完事；长期挂在
+NAS/服务器上推荐 Docker；改代码或想跟着源码走用 pip。
 
-### 方式一：下载预编译版本（不需要装 Python / Node）
+### 方式一：下载即用的懒人版（Windows，不需要装 Python / Node）
 
-去 [Releases](https://github.com/Owenwoow/Bambu-Print-Queue/releases) 下最新版本
-对应平台的单文件可执行程序（Linux / Windows / macOS），前端已经打进去了，双击或
-`./bpq daemon` 直接跑。跳到下面「打印机与配置」继续。
+去 [Releases](https://github.com/Owenwoow/Bambu-Print-Queue/releases) 下
+`bpq-<版本号>-windows-x86_64.exe`，**放进一个你打算长期留着它的文件夹**
+（比如 `E:\bpq\`，别放桌面或下载目录），然后双击。
+
+双击之后它会自己做完这些事：
+
+1. 在 exe 旁边生成一份 `config.toml`（第一次运行才生成，之后不会覆盖）；
+2. 启动 daemon 并把 WebUI 拉起来；
+3. 自动打开浏览器到 `http://127.0.0.1:8710`。
+
+剩下的就在网页上做：打开「设置」页填打印机的 IP / SERIAL / Access Code
+（怎么拿见下面「打印机与配置」），保存时会先试连一次。之后新建任务、看状态、
+查日志全在网页里，命令行一句都不用敲。
+
+黑色的控制台窗口要**一直开着**——它就是 daemon 本体，关掉了定时任务不会触发。
+任务库和日志都在 exe 旁边的 `var/` 目录里，重启不丢。
+
+> 同一个 exe 也是完整的 CLI：从终端敲 `bpq-....exe submit model.3mf --at 23:30`
+> 之类的命令，走的还是下面「使用教程」里那套，只有「双击、不带任何参数」时
+> 才进懒人版流程。
+
+Linux / macOS 目前不出预编译版本，用下面的 Docker 或源码方式。
 
 ### 方式二：Docker
 
@@ -88,16 +107,25 @@ npm run build
 
 ### 打印机与配置
 
-打印机上开启 **LAN Only 模式**（这样才会显示 Access Code；如果显示全 0，关掉再开一次）
-和 **Developer Mode**（关闭授权控制，否则第三方发起的启动指令会被拒，报
-`HMS 0500-0500-0001-0007`）。然后：
+不管用哪种方式安装，打印机上都要先开 **LAN Only 模式**（这样才会显示 Access Code；
+如果显示全 0，关掉再开一次）和 **Developer Mode**（关闭授权控制，否则第三方发起的
+启动指令会被拒，报 `HMS 0500-0500-0001-0007`）。
 
-```bash
-cp config.example.toml config.toml
-```
+三个值在打印机屏幕上：`ip`（网络设置里）、`access_code`（LAN Only 模式那一页）、
+`serial`（机器序列号）。
 
-填进 `[printer]` 段的 `ip` / `serial` / `access_code`。`config.toml` 已在
-`.gitignore` 里不会入库，文件里其余配置项都带注释，可以先用默认值。
+- **懒人版 exe**：不用碰配置文件，双击起来之后在网页的「设置」页里填这三个值，
+  保存时会先试连一次打印机。
+- **Docker / 源码**：
+
+  ```bash
+  cp config.example.toml config.toml
+  ```
+
+  填进 `[printer]` 段的 `ip` / `serial` / `access_code`。
+
+`config.toml` 已在 `.gitignore` 里不会入库，文件里其余配置项都带注释，
+可以先用默认值。
 
 ## 使用教程
 
@@ -204,6 +232,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now bpq
 ```
 src/bpq/
   cli.py          CLI：submit / ls / cancel / status / log / web / daemon
+  lazy.py         懒人版：双击 exe 时自动建配置、起 daemon、开浏览器
   client.py       CLI 找 daemon 说话（stdlib urllib，零新依赖）
   daemon.py       常驻进程：文件锁 + 长连接 + 调度器 + WebUI，四者同一个进程
   runtime.py      进程内的运行时注册表，让到点的 job 能摸到活的连接
