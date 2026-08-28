@@ -124,6 +124,13 @@ def _force_utf8_output() -> None:
                 pass
 
 
+# 必须在 click 解析参数之前调用，而不是放在 main() 的回调体里：不带子命令 /
+# 参数错误时 click 会在解析阶段直接打印 usage 并退出，根本不会执行到 main() 的
+# 函数体——之前挂在回调体里，双击 exe（等于不带任何参数运行）触发的正是这条早退
+# 路径，"???"的乱码窗口一闪而过之前，_force_utf8_output() 从没被调用过。
+_force_utf8_output()
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(__version__, prog_name="bpq")
 @click.option("--config", "config_path", type=click.Path(), help="指定 config.toml 路径")
@@ -132,7 +139,6 @@ def _force_utf8_output() -> None:
 @click.pass_context
 def main(ctx: click.Context, config_path: str | None, no_daemon: bool) -> None:
     """拓竹 A1 定时静默打印调度器。"""
-    _force_utf8_output()
     ctx.ensure_object(dict)
     ctx.obj["config"] = config_path
     ctx.obj["no_daemon"] = no_daemon
@@ -454,4 +460,16 @@ def daemon(ctx: click.Context) -> None:
 __all__ = ["main", "parse_when"]
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # 双击打包出来的 exe 等于不带任何参数运行：click 打完 usage 就退出，
+    # 控制台窗口跟着关掉，帮助文字一闪而过——这就是「双击闪退」的真相，
+    # 不是崩溃。只在这一种场景（冻结的单文件 exe + 零参数）暂停等一下回车，
+    # 正常从终端 `bpq xxx` 或脚本里调用不受影响。
+    bare_double_click = len(sys.argv) == 1 and getattr(sys, "frozen", False)
+    try:
+        main()
+    except SystemExit as exc:
+        if bare_double_click:
+            print("\n双击不会自动做任何事——上面是可用命令，去终端里敲完整命令用，"
+                  "比如 bpq.exe daemon。")
+            input("按回车键关闭…")
+        sys.exit(exc.code)
