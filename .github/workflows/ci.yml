@@ -11,7 +11,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        # 带上 build extras：tests/test_tray.py 直接测 tray.py 里生成图标的
+        # 那个纯函数，要用到 Pillow（pystray 本身在测试里没被真正 import，
+        # 但一起装上省得以后再漏一次）。
+        run: pip install -e ".[dev,build]"
       - name: Lint (ruff)
         run: ruff check .
       - name: Type check (mypy)
