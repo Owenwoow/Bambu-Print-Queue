@@ -185,6 +185,30 @@ def set_autostart(enabled: bool) -> None:
 # --------------------------------------------------------------------- glue
 
 
+def _open_path(path: str | Path) -> None:
+    """用系统关联程序打开一个文件/文件夹。
+
+    这个模块只会在 Windows 打包出的托盘 exe 里跑，但 `os.startfile` 在
+    typeshed 里只在 `sys.platform == "win32"` 分支下才有定义——mypy 在非
+    Windows 平台（比如 CI 的 ubuntu-latest）上检查这个文件时会报
+    "Module has no attribute" 找不到符号。这层判断纯粹是为了让 mypy 用
+    `sys.platform` 做静态可达性分析时能剪掉非 win32 分支，不是运行时会真的
+    走到 else（daemon.py 的 `_lock_fd` 也是同样的手法）。
+    """
+    if sys.platform == "win32":
+        os.startfile(path)  # noqa: S606
+
+
+def _confirm_yesno(message: str, *, title: str = "bpq") -> bool:
+    """原生 Yes/No 确认框，返回是否选了「是」。sys.platform 判断的理由同 `_open_path`。"""
+    if sys.platform != "win32":
+        return True  # 理论上跑不到这条分支，兜底不挡住调用方
+    mb_yesno_iconwarning = 0x00000004 | 0x00000030  # MB_YESNO | MB_ICONWARNING
+    idyes = 6
+    result = ctypes.windll.user32.MessageBoxW(0, message, title, mb_yesno_iconwarning)
+    return result == idyes
+
+
 def _on_toggle_autostart(icon, item) -> None:  # noqa: ANN001, ARG001
     set_autostart(not is_autostart_enabled())
 
@@ -196,12 +220,8 @@ def _on_quit(icon, item, stop_event: threading.Event) -> None:  # noqa: ANN001, 
     ctx = runtime.current()
     pending_count = len(ctx.store.list(pending_only=True)) if ctx is not None else 0
     message = _confirm_exit_message(pending_count)
-    if message is not None:
-        mb_yesno_iconwarning = 0x00000004 | 0x00000030  # MB_YESNO | MB_ICONWARNING
-        idyes = 6
-        result = ctypes.windll.user32.MessageBoxW(0, message, "bpq", mb_yesno_iconwarning)
-        if result != idyes:
-            return
+    if message is not None and not _confirm_yesno(message):
+        return
     stop_event.set()
     icon.stop()
 
@@ -233,12 +253,12 @@ def _build_menu(cfg: Config, stop_event: threading.Event, web_url: str | None): 
     items.append(pystray.MenuItem(_next_task_text, None, enabled=False))
     items.append(pystray.Menu.SEPARATOR)
     items.append(
-        pystray.MenuItem("打开配置文件", lambda icon, item: os.startfile(cfg.path))  # noqa: ANN001
+        pystray.MenuItem("打开配置文件", lambda icon, item: _open_path(cfg.path))  # noqa: ANN001
     )
     items.append(
         pystray.MenuItem(
             "打开日志文件夹",
-            lambda icon, item: os.startfile(Path(cfg.daemon.db_path).parent),  # noqa: ANN001
+            lambda icon, item: _open_path(Path(cfg.daemon.db_path).parent),  # noqa: ANN001
         )
     )
     items.append(

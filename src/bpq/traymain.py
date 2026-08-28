@@ -45,7 +45,15 @@ def _setup_logging() -> Path:
 
 
 def _show_error(title: str, message: str) -> None:
-    """无控制台窗口时唯一能让用户看到错误的办法：原生弹窗。"""
+    """无控制台窗口时唯一能让用户看到错误的办法：原生弹窗。
+
+    这个模块只会在 Windows 打包出的托盘 exe 里跑，但 `ctypes.windll` 只在
+    typeshed 的 `sys.platform == "win32"` 分支下才有定义——这层判断是为了让
+    mypy 在非 Windows 平台（CI 的 ubuntu-latest）上检查时能剪掉这条分支，
+    不是运行时真的会走到别处（tray.py 的 `_open_path`/`_confirm_yesno` 同理）。
+    """
+    if sys.platform != "win32":
+        return
     mb_iconerror = 0x00000010
     ctypes.windll.user32.MessageBoxW(0, message, title, mb_iconerror)
 
