@@ -6,7 +6,9 @@ from bpq.store import TaskStore
 
 def _task(**kw) -> Task:
     return Task(
-        source_path=kw.pop("source_path", r"E:\models\benchy.gcode.3mf"),
+        # 用正斜杠：反斜杠只有 PureWindowsPath 认作分隔符，PurePosixPath 不认，
+        # 会导致 .name 取 basename 在 Linux CI 上失败、在 Windows 本地又是好的。
+        source_path=kw.pop("source_path", "E:/models/benchy.gcode.3mf"),
         scheduled_at=kw.pop("scheduled_at", datetime.now() + timedelta(hours=3)),
         **kw,
     )
