@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -154,8 +155,31 @@ def find_config_path(explicit: str | os.PathLike[str] | None = None) -> Path:
 
 
 def project_root() -> Path:
-    """src/bpq/config.py → 项目根。"""
+    """程序的「家」：config.toml 和 var/ 落在这里。
+
+    源码运行时是仓库根（src/bpq/config.py 往上两级）。
+
+    打包成单文件 exe 之后必须换成 exe 自己所在的目录，**不能再用 `__file__`**——
+    那时它指向 PyInstaller 每次启动重建、进程退出就删掉的临时解包目录。
+    照旧用 `__file__` 的后果不是「读不到配置」这么简单：`load()` 会把 var/ 下的
+    任务库、日志、上传缓存全按 config.toml 所在目录解析，于是每跑一次都是一套新的
+    空任务库，关掉就没——直接违反「任务必须持久化」这条硬约束，而且一声不吭。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
+
+
+def bundled_example() -> Path | None:
+    """打包进 exe 里的 config.example.toml，找不到就返回 None。
+
+    懒人版第一次启动要靠它生成一份 config.toml；源码运行时直接用仓库里那份。
+    """
+    if getattr(sys, "frozen", False):
+        candidate = Path(getattr(sys, "_MEIPASS", "")) / "config.example.toml"
+    else:
+        candidate = project_root() / "config.example.toml"
+    return candidate if candidate.is_file() else None
 
 
 def load(explicit: str | os.PathLike[str] | None = None) -> Config:
