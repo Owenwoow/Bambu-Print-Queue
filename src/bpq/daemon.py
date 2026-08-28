@@ -187,11 +187,20 @@ def _heartbeat() -> None:
     从而感知 CLI 进程刚写进去的新任务。"""
 
 
-def serve(cfg: Config, *, on_web_ready: Callable[[str], None] | None = None) -> None:
+def serve(
+    cfg: Config,
+    *,
+    on_web_ready: Callable[[str], None] | None = None,
+    stop_event: threading.Event | None = None,
+) -> None:
     """跑 daemon，直到收到退出信号。
 
     on_web_ready：WebUI 起来之后拿它的地址回调一次，懒人版用它自动开浏览器。
     WebUI 关着或没起来时不会被调用。
+
+    stop_event：调用方想自己掌握退出时机（比如托盘版在菜单里点「退出」）就传一个
+    自己持有的 Event 进来，daemon 侧的轮询循环会在它被置位后的 1 秒内退出。
+    不传就沿用原来的行为——daemon 自己造一个，只能靠信号（Ctrl-C）触发。
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -200,10 +209,15 @@ def serve(cfg: Config, *, on_web_ready: Callable[[str], None] | None = None) -> 
     # 单实例检查放在最外层：重复启动要在连打印机、建 jobstore、阻止睡眠之前就失败，
     # 否则第二个实例已经把第一个的 MQTT 连接挤掉了，再报错也晚了。
     with single_instance(lock_path_for(cfg)):
-        _serve_locked(cfg, on_web_ready=on_web_ready)
+        _serve_locked(cfg, on_web_ready=on_web_ready, stop_event=stop_event)
 
 
-def _serve_locked(cfg: Config, *, on_web_ready: Callable[[str], None] | None = None) -> None:
+def _serve_locked(
+    cfg: Config,
+    *,
+    on_web_ready: Callable[[str], None] | None = None,
+    stop_event: threading.Event | None = None,
+) -> None:
     from bpq import runtime
 
     journal = Journal(cfg.daemon.journal_path)
@@ -226,7 +240,7 @@ def _serve_locked(cfg: Config, *, on_web_ready: Callable[[str], None] | None = N
         replace_existing=True,
     )
 
-    stop = threading.Event()
+    stop = stop_event if stop_event is not None else threading.Event()
 
     def _on_signal(signum, frame) -> None:  # noqa: ANN001
         log.info("收到信号 %s，准备退出", signum)

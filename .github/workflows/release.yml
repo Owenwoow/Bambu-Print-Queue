@@ -12,7 +12,11 @@ permissions:
   packages: write
 
 jobs:
-  # 目前只出 Windows 版（懒人版：双击就起 daemon + WebUI）。
+  # 目前只出 Windows 版，且是两个产物：
+  #   - bpq-<版本>-windows-x86_64.exe      GUI 托盘版（--windowed，src/bpq/traymain.py）
+  #     双击就起 daemon + WebUI，托盘常驻，不带控制台窗口，主推的懒人版形态。
+  #   - bpq-cli-<版本>-windows-x86_64.exe  控制台版（src/bpq/cli.py）
+  #     给愿意敲命令的人：submit / ls / daemon / status ... 完整 CLI。
   # 要恢复 Linux / macOS，把 matrix 里对应两行放回来，并把打包那步的 --add-data
   # 分隔符换成冒号（Windows 用分号，POSIX 用冒号，这是 PyInstaller 的规矩）。
   build-binaries:
@@ -48,20 +52,61 @@ jobs:
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: PyInstaller 打包
+      - name: PyInstaller 打包（GUI 托盘版，懒人版，主推）
         run: >
-          pyinstaller --noconfirm --onefile --name bpq
+          pyinstaller --noconfirm --onefile --windowed --name bpq
           --add-data "web/dist;web/dist"
           --add-data "config.example.toml;."
           --paths src
           --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
-          src/bpq/cli.py
+          --collect-all pystray --collect-all PIL
+          src/bpq/traymain.py
 
-      - name: 冒烟测试（--version 起得来）
-        shell: bash
-        run: ./dist/bpq.exe --version
+      - name: 冒烟测试（GUI 托盘版：BPQ_TRAY_SELFTEST=1 验证配置读取→daemon 起→WebUI 绑定端口→优雅退出）
+        # traymain.py 没有 --version 这种 CLI 解析，而且是 --windowed 无控制台窗口，
+        # 没地方看输出，所以不能照搬 CLI 版那种「跑一下 --version」的冒烟测试。
+        # 这一步专门沿用统一的 shell: bash 会有风险：bash 环境不一定有可靠的
+        # `timeout` 命令，子进程一旦卡住（比如误入真正的 pystray.Icon.run() 消息泵）
+        # 就可能一路卡到 job 整体超时，所以改用 PowerShell 原生的
+        # Start-Process -PassThru + Wait-Process -Timeout 自己控制超时和收尾。
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      - name: 改名成带版本号和平台标识的产物
+          # 在一个干净的临时目录里跑：exe 旁边会自动生成 config.toml（占位打印机
+          # IP，连不上是预期的，不影响这里要验证的东西），不要污染 checkout 目录。
+          $work = Join-Path $env:RUNNER_TEMP "bpq-tray-selftest"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Copy-Item "dist/bpq.exe" (Join-Path $work "bpq.exe") -Force
+          $outFile = Join-Path $work "selftest_result.txt"
+
+          $env:BPQ_TRAY_SELFTEST = "1"
+          $env:BPQ_TRAY_SELFTEST_OUT = $outFile
+
+          $proc = Start-Process -FilePath (Join-Path $work "bpq.exe") -WorkingDirectory $work -PassThru
+          Wait-Process -Id $proc.Id -Timeout 60 -ErrorAction SilentlyContinue
+
+          if (-not $proc.HasExited) {
+            Write-Host "##[error] GUI 托盘版 selftest 60 秒内未退出，判定超时失败，强杀进程"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            exit 1
+          }
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "##[error] GUI 托盘版 selftest 退出码非 0：$($proc.ExitCode)"
+            exit 1
+          }
+          if (-not (Test-Path $outFile)) {
+            Write-Host "##[error] GUI 托盘版 selftest 未生成结果文件：$outFile"
+            exit 1
+          }
+          $content = Get-Content $outFile -Raw
+          if ($content -notmatch "OK") {
+            Write-Host "##[error] GUI 托盘版 selftest 结果文件内容异常：$content"
+            exit 1
+          }
+          Write-Host "GUI 托盘版 selftest 通过：$outFile -> $content"
+
+      - name: 改名成带版本号和平台标识的产物（GUI 托盘版）
         shell: bash
         run: mv dist/bpq.exe "bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}"
 
@@ -69,6 +114,29 @@ jobs:
         with:
           name: bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
           path: bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
+          if-no-files-found: error
+
+      - name: PyInstaller 打包（控制台版：submit / ls / daemon / status ...）
+        run: >
+          pyinstaller --noconfirm --onefile --name bpq-cli
+          --add-data "web/dist;web/dist"
+          --add-data "config.example.toml;."
+          --paths src
+          --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
+          src/bpq/cli.py
+
+      - name: 冒烟测试（控制台版：--version 起得来）
+        shell: bash
+        run: ./dist/bpq-cli.exe --version
+
+      - name: 改名成带版本号和平台标识的产物（控制台版）
+        shell: bash
+        run: mv dist/bpq-cli.exe "bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
+          path: bpq-cli-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
           if-no-files-found: error
 
   docker:

@@ -31,7 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "httpx>=0.27"]  # httpx 供 TestClient
-build = ["pyinstaller>=6.0"]  # 打单文件二进制/exe，见 .github/workflows/release.yml
+build = [
+    "pyinstaller>=6.0",  # 打单文件二进制/exe，见 .github/workflows/release.yml
+    # 下面两个只有 GUI 版 exe（traymain.py 的托盘常驻程序）用得到，
+    # daemon/CLI 主依赖不需要，故不放进 dependencies。
+    "pystray>=0.19",
+    "Pillow>=10.0",
+]
 
 [project.scripts]
 bpq = "bpq.cli:main"
