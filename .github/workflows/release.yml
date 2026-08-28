@@ -12,17 +12,16 @@ permissions:
   packages: write
 
 jobs:
+  # 目前只出 Windows 版（懒人版：双击就起 daemon + WebUI）。
+  # 要恢复 Linux / macOS，把 matrix 里对应两行放回来，并把打包那步的 --add-data
+  # 分隔符换成冒号（Windows 用分号，POSIX 用冒号，这是 PyInstaller 的规矩）。
   build-binaries:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            asset: bpq-linux-x86_64
           - os: windows-latest
-            asset: bpq-windows-x86_64.exe
-          - os: macos-latest
-            asset: bpq-macos-arm64
+            suffix: windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,44 +43,32 @@ jobs:
       - name: 装运行依赖 + pyinstaller
         run: pip install -e ".[build]"
 
-      - name: PyInstaller 打包（Windows）
-        if: runner.os == 'Windows'
-        run: >
-          pyinstaller --noconfirm --onefile --name bpq
-          --add-data "web/dist;web/dist" --paths src
-          --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
-          src/bpq/cli.py
+      - name: 从 tag 取版本号
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: PyInstaller 打包（Linux / macOS）
-        if: runner.os != 'Windows'
+      - name: PyInstaller 打包
         run: >
           pyinstaller --noconfirm --onefile --name bpq
-          --add-data "web/dist:web/dist" --paths src
+          --add-data "web/dist;web/dist"
+          --add-data "config.example.toml;."
+          --paths src
           --collect-submodules bpq --collect-all apscheduler --collect-all sqlalchemy
           src/bpq/cli.py
 
       - name: 冒烟测试（--version 起得来）
         shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            ./dist/bpq.exe --version
-          else
-            ./dist/bpq --version
-          fi
+        run: ./dist/bpq.exe --version
 
-      - name: 改名成带平台标识的产物
+      - name: 改名成带版本号和平台标识的产物
         shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            mv dist/bpq.exe "${{ matrix.asset }}"
-          else
-            mv dist/bpq "${{ matrix.asset }}"
-          fi
+        run: mv dist/bpq.exe "bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
+          path: bpq-${{ steps.ver.outputs.version }}-${{ matrix.suffix }}
           if-no-files-found: error
 
   docker:
