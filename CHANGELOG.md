@@ -3,6 +3,28 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.5] — 2026-08-28
+
+### 新增
+
+- **打印机连接页支持"自动获取序列号"。** 填完 IP 和 Access Code 后点一下按钮，
+  连一次 FTPS（固定用户名 `bblp` + Access Code，不需要预先知道序列号）读
+  `logger/` 目录的文件名解析出 SERIAL，自动填进输入框——这个字段依然可以手动
+  改，自动获取失败也不会挡住手动填写。FTPS 和 MQTT 是两个独立连接，这个探测
+  不受"daemon 运行期间不得另建 MQTT 连接"这条红线约束，用完即关，不留存。
+- **Release 从只出 Windows 扩展到三大桌面平台。** 现在四个二进制：
+  `bpq-<版本>-windows-x86_64.exe`（托盘版）、
+  `bpq-cli-<版本>-windows-x86_64.exe`（控制台版）、
+  `bpq-cli-<版本>-linux-x86_64`、`bpq-cli-<版本>-macos-arm64`（Apple Silicon）。
+  懒人版/托盘 UI 依然只有 Windows；Linux/macOS 新增的是控制台/daemon 版，
+  全部免装 Python/Node，下载即用。
+
+### 变更
+
+- **exe 文件图标、托盘运行时图标统一换成 WebUI 同款视觉**（绿色圆角方块 + 白色
+  "b"）。托盘图标继续随打印机状态变色，只是把原来的纯色圆点换成了这个字标。
+- 前端"定时静默打印"统一改成"拓竹打印任务预约"（页面标题、侧栏、登录页）。
+
 ## [0.3.4] — 2026-08-28
 
 > v0.3.3 的 tag 已推送但发布失败（GUI 托盘版 exe 在 CI 冒烟测试阶段没过），
