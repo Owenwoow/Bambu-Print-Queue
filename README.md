@@ -1,18 +1,28 @@
-# bpq — 拓竹 A1 定时静默打印调度器
+# Bambu-Print-Queue — 拓竹预约打印调度器
 
 [![CI](https://github.com/Owenwoow/Bambu-Print-Queue/actions/workflows/ci.yml/badge.svg)](https://github.com/Owenwoow/Bambu-Print-Queue/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Owenwoow/Bambu-Print-Queue)](https://github.com/Owenwoow/Bambu-Print-Queue/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
-> 替我记住「睡前再打」这件事的中间人。
+> 提交任务时指定几点开始，触发前打印机对这个任务完全不知情——不预热、不出声，
+> 到点了才真正开始。
 
-打印机在书房，启动例程（尤其振动补偿那段）很吵，晚上开工会吵到休息。
-真正的痛点不是「我想定时」，而是**不想把动作留给未来的自己**——有灵感时人在电脑前，
-但正确做法是睡前离开书房再点开始，而睡前经常忘。
+打印机放在书房，就在工位旁边。不管是白天在这儿干活还是晚上准备睡觉，打印机一启动
+就会吵到人。需求很简单：想现在提交，让它在我不在书房的时候开始打印——但正确做法
+是睡前回书房手动点开始，而睡前太容易忘。
 
-bpq 接下这个动作：当场把任务交出去，指定一个绝对时刻，**在那之前打印机对它一无所知**——
-不预热、不转风扇、不出声。到点了自己开打。
+现成方案一提交就会让打印机进入待机、开始加热，算不上真正的"定时"。bpq 把这一步
+拆开：先静默把任务和文件交给打印机存着，到约定时刻才真正启动。
+
+## 状态
+
+**v0.3，真机验证通过，日常可用。** 提交 → 静默上传 → 到点触发 → 真的开始打印，这条
+链路已经在真机上跑通，触发时刻零误差；WebUI、AMS 识别、连接让出/抢回均已验证，细节
+见 [`docs/验证记录-通道A.md`](docs/验证记录-通道A.md)。
+
+多色打印（AMS 外部料映射语义）还没实测完，目前只验证过单色 `[0]`，进度见
+[`docs/v0.2-多色映射语义.md`](docs/v0.2-多色映射语义.md)。
 
 ## 目录
 
@@ -26,23 +36,6 @@ bpq 接下这个动作：当场把任务交出去，指定一个绝对时刻，*
 - [已知坑](#已知坑)
 - [贡献](#贡献)
 
-## 状态
-
-**v0.3，真机验证通过，日常可用。**
-
-端到端链路已经在真机上跑通：`bpq submit` 定时提交 → 静默上传 → daemon 到点触发 →
-打印机真的开始打印，`submitted → uploaded → triggered → started` 全部落地，触发时刻
-零误差。MQTT 状态读取、AMS 四槽识别、FTPS 静默上传、局域网 WebUI、连接的「让出/给
-Studio 用」与「到点自动抢回」、CLI 经由 daemon 的 HTTP API 走——这些都已经过真机验证，
-详细过程见 [`docs/验证记录-通道A.md`](docs/验证记录-通道A.md)。
-
-WebUI 从 v0.2 起就是产品的一部分：寄生在 daemon 进程里，复用同一条 MQTT 长连接，能新建
-任务、看打印机实时状态、看 AMS/耗材、查日志、管理任务列表；打印机连接参数与全局默认值
-也能在网页上改。架构细节见 [`docs/v0.2-WebUI-架构.md`](docs/v0.2-WebUI-架构.md)。
-
-多色打印按需求排在最后：`ams_mapping` 里「外部料该填 -1 还是 255」这类语义细节尚未
-实测，目前只验证过单色 `[0]`。进度见 [`docs/v0.2-多色映射语义.md`](docs/v0.2-多色映射语义.md)。
-
 ## 安装
 
 三种方式任选一种：Windows 上想开箱即用就下懒人版 exe，双击就完事；长期挂在
@@ -51,63 +44,27 @@ NAS/服务器上推荐 Docker；改代码或想跟着源码走用 pip。
 ### 方式一：下载即用的懒人版（Windows，不需要装 Python / Node）
 
 去 [Releases](https://github.com/Owenwoow/Bambu-Print-Queue/releases) 下
-`bpq-<版本号>-windows-x86_64.exe`，**放进一个你打算长期留着它的文件夹**
-（比如 `E:\bpq\`，别放桌面或下载目录），然后双击。
+`bpq-<版本号>-windows-x86_64.exe`，放进一个你打算长期留着它的文件夹（比如
+`E:\bpq\`，别放桌面或下载目录），双击运行。
 
-双击之后它会自己做完这些事：
+它会自动生成配置、启动 daemon 和 WebUI、打开浏览器到 `http://127.0.0.1:8710`，
+自己常驻在系统托盘里（不弹黑框控制台），图标颜色跟着打印机状态变。之后新建
+任务、看状态、查日志全在网页里做，打印机 IP / SERIAL / Access Code 在「设置」页
+填（怎么拿见下面「打印机与配置」），命令行一句都不用敲。
 
-1. 在 exe 旁边生成一份 `config.toml`（第一次运行才生成，之后不会覆盖）；
-2. 启动 daemon 并把 WebUI 拉起来；
-3. 自动打开浏览器到 `http://127.0.0.1:8710`；
-4. **不弹黑框控制台**——程序常驻在系统托盘（任务栏右下角）里，一个圆点图标，
-   颜色跟着打印机状态变（灰=未连接、蓝=空闲、绿=打印中、橙=暂停、红=上一单
-   失败），鼠标悬停能看到一行状态摘要。
+关掉浏览器标签页不等于关掉程序——daemon 在托盘那边继续跑，定时任务照常触发；
+真正要退出，右键托盘图标选「退出」。
 
-剩下的就在网页上做：打开「设置」页填打印机的 IP / SERIAL / Access Code
-（怎么拿见下面「打印机与配置」），保存时会先试连一次。之后新建任务、看状态、
-查日志全在网页里，命令行一句都不用敲。
-
-**关掉浏览器标签页不等于关掉程序**——daemon 在托盘图标那边继续跑，定时任务
-照常触发。真正要退出，右键点托盘图标选「退出」；如果这时候还有任务没触发，
-会弹一次确认框，避免手滑丢单。
-
-右键托盘图标能做的事：
-
-- **打开控制台**——重新拉起浏览器指到 WebUI（默认单击图标同样效果）；
-- **打印机 / 下一个任务**——两行只读摘要，不用开网页就能扫一眼状态；
-- **打开配置文件**——用系统关联的程序打开 `config.toml`（没有关联就会让你选一个）；
-- **打开日志文件夹**——直接跳到 `var/` 目录，日志文件是 `var/bpq.log`，
-  出问题第一时间看这个文件（没有控制台窗口了，日志文件是唯一的排障入口）；
-- **开机自启**——勾上之后开机自动把这个 exe 拉起来，不用每次手动双击；
-- **退出**——见上一段。
-
-任务库和日志都在 exe 旁边的 `var/` 目录里，重启不丢。
-
-> Release 页面现在有两个 Windows exe：`bpq-<版本号>-windows-x86_64.exe`
-> 是托盘版（上面说的这个，双击就用，推荐）；`bpq-cli-<版本号>-windows-x86_64.exe`
-> 是控制台版，完整保留 `bpq-cli.exe submit / ls / cancel / status / log / web /
-> daemon` 这套命令行，用法见下面「使用教程」。两者共享同一套
-> daemon/WebUI/调度逻辑，只是入口不同：托盘版没有命令行子命令能力（双击即用，
-> 不认参数）；控制台版零参数双击时走的是黑框懒人流程（关窗口即关程序），
-> 带参数敲命令才是它的正经用法。
-
-> 两个 exe 都没有代码签名，Windows 首次运行大概率会弹 SmartScreen 提示
-> 「Windows 已保护你的电脑」——点「更多信息」，再点「仍要运行」即可，
-> 后续运行不会再弹。
-
-**懒人版（托盘 UI）只有 Windows**——`tray.py` / `traymain.py` 深度依赖
-`ctypes.windll` / `winreg` / `os.startfile` / `pystray` 的 Windows 后端，没做过
-跨平台适配。但**控制台/daemon 版**（`bpq-cli`，就是上面说的 `bpq-cli.exe` 那套
-命令行）现在 Linux 和 macOS（Apple Silicon）也有预编译二进制可下：`Releases`
-页面里的 `bpq-cli-<版本号>-linux-x86_64` 和 `bpq-cli-<版本号>-macos-arm64`，同样
-不需要装 Python / Node，下载后 `chmod +x` 就能跑 `bpq-cli --help`。命令行用法见
-下面「使用教程」；不想用预编译二进制，也可以照样走下面的 Docker 或源码方式。
+托盘菜单完整说明、Windows SmartScreen 提示、Linux/macOS 命令行版下载，见
+[`docs/安装-Windows懒人版.md`](docs/安装-Windows懒人版.md)。
 
 ### 方式二：Docker
 
 见下面「[部署 → Docker](#docker)」一节，`docker compose up -d` 一条命令起服务。
 
 ### 方式三：源码安装
+
+需要 Python 3.11+（`pyproject.toml` 里 `requires-python` 写死了这条下限）。
 
 ```bash
 git clone https://github.com/Owenwoow/Bambu-Print-Queue.git
@@ -116,9 +73,19 @@ cd Bambu-Print-Queue
 
 #### 后端
 
+建议先建虚拟环境，避免跟系统 Python 装的包冲突：
+
 ```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux / macOS: source .venv/bin/activate
+
 pip install -e ".[dev]"
 ```
+
+只想跑起来、不打算改代码的话 `pip install -e .`（不带 `[dev]`）就够了——`[dev]`
+多装的是 `pytest` / `ruff` / `mypy` 这套开发工具，改代码时才用得上，细节见
+[`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 `pyproject.toml` 里已经声明了 `bpq` 这个 CLI 入口，装完可以直接跑 `bpq --help`。
 
@@ -134,6 +101,8 @@ npm run build
 
 构建产物是 `web/dist`，由 daemon 进程直接 serve。没构建也不影响 daemon 和 CLI 本身，
 只是访问网页会看到一页构建说明。
+
+装完接着看下面「打印机与配置」填好 `config.toml`，再照「使用教程」跑 `bpq daemon`。
 
 ### 打印机与配置
 
@@ -295,63 +264,35 @@ Dockerfile        多阶段构建：Node 编前端 → 只带 Python 运行依�
 
 ## 设计约定
 
-这些是定了的，改之前先回去看 [`docs/`](docs/)：
-
-- **触发前必须完全静默。** 这是项目唯一的存在理由。任何让打印机提前有动作的方案都出局
-  （已因此排除 gcode 里插 `G4` 延时）。
-- **任务必须持久化。** 服务重启、电脑睡眠唤醒之后待发任务要还在。这条把项目从
-  「一个脚本」抬到「有状态的常驻进程」。
-- **到点机器不空闲就放弃**，写日志。不做「十分钟后再试」，不做队列。
-- **传输层可插拔**，但只实现通道 A。通道 B 有封号风险、证书约一年过期，只占位不实现。
-- **先验通道，再写调度器。** 调度那部分闭着眼也能写；「发送」这一下不是自己说了算。
-- **打印机只接受一个 MQTT 连接，所以那条连接必须有唯一的主人。** 是
-  `PrinterLink`：daemon 里任何代码都不许再自己 `build_transport()`，
-  别的进程要数据就走 daemon 的 HTTP API。
-- **「我们发了什么」和「机器说了什么」在数据结构上分开，界面上也不混排。**
-  五个打印开关里有三个根本没有对应的上报字段（见
-  [`src/bpq/report.py`](src/bpq/report.py) 的说明），把两者画成对照表
-  就是在编造确定性。
-- **WebUI 是 daemon 的一个前端，不是独立产品。** 寄生在 daemon 进程里，复用同一条
-  MQTT 长连接，绝不另开连接；不提供「立即打印」，不做打印机 SD 卡文件管理，
+- 触发前必须完全静默——项目唯一的存在理由。
+- 任务持久化在 SQLite，服务重启 / 睡眠唤醒后待发任务还在。
+- 到点打印机不空闲就放弃、写日志，不重试、不排队。
+- 传输层只做本地 MQTT + FTPS（通道 A），不接云端 API（通道 B，只占位）。
+- 打印机只认一条 MQTT 连接，daemon 内唯一入口是 `PrinterLink`，别的进程一律走
+  daemon 的 HTTP API。
+- 「我们发了什么」（`Task.options`）和「机器说了什么」（`PrinterSnapshot`）分开存，
+  界面上也不做对照。
+- WebUI 是 daemon 的前端，不是独立产品：不做「立即打印」、不做 SD 卡文件管理、
   不做多打印机。
 
-明确不做：云端部署、多任务多打印机、参与切片、推送通知（只留接口）、升级打印机固件。
+明确不做：云端部署、多任务多打印机、参与切片、推送通知、升级打印机固件。
+
+每条背后的取舍见 [`docs/`](docs/)，尤其 [`验证记录-通道A.md`](docs/验证记录-通道A.md)。
 
 ## 已知坑
 
-- 打印机同一时刻**只接受一个 MQTT 连接**。daemon 常连时别同时开着 Studio/OrcaSlicer。
-- A1 的 FTPS 数据通道**必须加密**（`ftps_encrypt_data = true`）——明文会被直接断开。
-  这与部分社区文档的说法相反，以 `docs/验证记录-通道A.md` 的实测为准。
-- 不知道 SERIAL 时**不能用 `#` 通配订阅**去发现它：broker ACL 会把你静默踢下线。
-  SERIAL 可以从 FTPS 的 `logger/` 文件名里读到。
-- A1 只支持**被动模式**（PASV）。
-- A1 传完文件后**不回 TLS `close_notify`**，标准 ftplib 会卡在 `conn.unwrap()` 上，
-  让一次成功的上传看起来像超时失败。`ImplicitFTP_TLS.storbinary()` 已覆盖处理。
-- FTPS 吞吐约 **46 KB/s**（ESP32 硬件上限）。别直传带 `Auxiliaries/` 的完整 3mf——
-  同一模型 Studio 精简版 369 KB，原始版 26 MB，后者要传 9 分钟。
-- 减噪 flag 能砍掉振动扫频与探床，但 **homing 与 purge line 不可免**——
-  「触发前静默」是 100% 的，「触发后立即安静」只是显著改善。
-- **先不要升级固件。** 在验证通过的版本上锁定；授权控制与 LAN 行为在持续变动。
-- `gcode_state = FAILED` 是上一单的**结局**，不是"机器正忙"——机器其实空闲，
-  但板子上可能有残骸。默认不会在 FAILED 之后自动触发（`start_after_failure = false`），
-  需要人确认板子干净后临时改配置放行一次。
-- **同一时刻只能有一个 daemon**。重复启动会被拒绝并给出明确提示，而不是静默
-  互抢打印机的 MQTT 连接。
-- `get_state()` 会内置等待首个状态报文（最多 `STATE_TIMEOUT` 秒），调用方不需要
-  再自己 `sleep`——之前手写的 `sleep` 曾在 `TaskRunner.fire()` 里漏掉一处，
-  导致定时任务到点必然读到 `UNKNOWN` 而被放弃，是验收前修复的最严重的 bug。
-- **daemon 常连着 MQTT，Bambu Studio 就连不上。** 要用 Studio 时点 WebUI 顶栏的
-  「让给 Studio」（或 `POST /api/printer/yield`）。让出期间定时任务照常在册：
-  到点会自动抢回连接再启动，日志里记一条 `connection_reclaimed`。
-- **本机免鉴权默认是开的**（`[web] allow_local_no_auth`）。方便 CLI 零配置走 HTTP，
-  代价是这台电脑上任何进程、任何用户都能不经口令操作打印任务。多人共用的机器上关掉它。
-- **口令是明文过局域网的**（内网跑的是 http，没做 TLS）。用一个不与别处复用的口令。
-- **Bambu Studio 自己的日志是 AES 加密的**（`%APPDATA%/BambuStudio/log/*_enc_*.log`），
-  别指望从里面捞它发出去的 `project_file` payload——试过了，正文可打印字符只有 43%。
-- **上传给打印机之前要剥掉 `Auxiliaries/`。** 同一个模型带装配说明 PDF 是 26 MB，
-  46 KB/s 要传 9 分钟；剥掉之后 369 KB，8 秒。`threemf.slim()` 会做这件事，
-  而且只剥这一个目录——实测 Studio 自己的「精简」就等于删掉它，
-  非 Auxiliaries 条目一个不差（42 对 42），没有理由自己再去猜哪些能删。
+- 打印机同一时刻只接受一个 MQTT 连接：daemon 在跑时别同时开 Studio/OrcaSlicer；
+  要用 Studio 就点 WebUI 里的「让给 Studio」，到点会自动抢回来。
+- 先不要升级固件，在验证通过的版本上锁定——授权控制和 LAN 行为在持续变动。
+- 减噪只能砍掉振动扫频和探床，homing、purge line 免不了：「触发前静默」是
+  100%，「触发后立即安静」只是好很多。
+- 本机默认免密码访问（`allow_local_no_auth`），多人共用的电脑上记得关掉；
+  局域网跑的是明文 http，密码不要跟别处复用。
+- 上一单失败（`gcode_state = FAILED`）不代表机器忙，但默认也不会自动接着打
+  （怕往没清理的板子上打），需要人确认板子干净后手动放行一次。
+
+更细的坑（TLS 握手细节、FTPS 限速、SERIAL 怎么拿到）都是真机踩出来的实测结论，
+记在 [`docs/验证记录-通道A.md`](docs/验证记录-通道A.md)，改传输层之前必读。
 
 ## 贡献
 

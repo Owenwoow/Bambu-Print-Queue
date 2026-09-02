@@ -2,6 +2,9 @@
 
 ## 面向使用者
 
+- [`安装-Windows懒人版.md`](安装-Windows懒人版.md) —— Windows 托盘版的完整细节：
+  托盘菜单、两个 exe 的区别、SmartScreen 提示、Linux/macOS 命令行版下载。
+  简要版见项目根 [README.md](../README.md) 的「安装 → 方式一」。
 - [`部署-Docker.md`](部署-Docker.md) —— Docker / docker compose 部署详细教程。
   非 Docker 部署（systemd / 直接跑）见项目根 [README.md](../README.md) 的「部署」一节。
 
